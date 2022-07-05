@@ -1,2 +1,2 @@
 # Additive Attention Is Not All You Need?
-This curiostiy project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling
+This curiostiy project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten.
