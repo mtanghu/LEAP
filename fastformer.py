@@ -5,20 +5,18 @@ import torch.nn.functional as F
 import math
 
 
-
-class OldFastSelfAttention(nn.Module):
+class FastSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.input_dim = config.hidden_size
         
-        self.query = nn.Linear(self.input_dim, self.input_dim)
-        self.query_att = nn.Linear(self.input_dim, self.input_dim)
-        self.keys = nn.Linear(self.input_dim, self.input_dim)
-        self.key_att = nn.Linear(self.input_dim, self.input_dim)
-        self.values = nn.Linear(self.input_dim, self.input_dim)
+        self.query = nn.Linear(config.hidden_size, config.hidden_size)
+        self.query_att = nn.Linear(config.hidden_size, config.hidden_size)
+        self.keys = nn.Linear(config.hidden_size, config.hidden_size)
+        self.key_att = nn.Linear(config.hidden_size, config.hidden_size)
+        self.values = nn.Linear(config.hidden_size, config.hidden_size)
         
-        self.attn_norm = nn.LayerNorm(self.input_dim)
+        self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
         
         # Like MLP mixer model (since we have a point-wise multiply)
@@ -34,76 +32,102 @@ class OldFastSelfAttention(nn.Module):
         query = self.query(hidden_states)
         keys = self.keys(hidden_states)
         values = self.values(hidden_states)
-        scaling_vec = torch.arange(1, seq_len+1, device=hidden_states.device, requires_grad=False).reshape(1, -1, 1)
         
-        # equation (3)
-        query_weight = F.softmax(self.query_att(query) / d_model**.5, dim = -1)
+        # equation (3) manual (causal) softmax
+        query_weight = torch.exp(self.query_att(query) / d_model**.5)
+        query_weight = query_weight / torch.cumsum(query_weight, dim = 1)
         
-        # equation (4), scaling because of cumulative sum
-        pooled_query = torch.cumsum(query_weight * query, dim = 1) / scaling_vec
+        # equation (4)
+        pooled_query = torch.cumsum(query_weight * query, dim = 1)
         
         # corresponds to "p_i = q * k_i" in paper
         mixed_keys = pooled_query * keys
         
-        # equation (5)
-        keys_weight = F.softmax(self.key_att(mixed_keys) / d_model**.5, dim = -1)
+        # equation (5) manual (causal) softmax
+        keys_weight = torch.exp(self.key_att(mixed_keys) / d_model**.5)
+        keys_weight = keys_weight / torch.cumsum(keys_weight, dim = 1)
         
         # equation (6)
-        pooled_keys = torch.cumsum(keys_weight * mixed_keys, dim = 1) / scaling_vec
+        pooled_keys = torch.cumsum(keys_weight * mixed_keys, dim = 1)
         
         # corresponds to "u_i = k * v_i" in paper
         weighted_values = pooled_keys * values
+        
+        # dropout last like megatron
+        weighted_values = self.attn_dropout(weighted_values)
       
         return weighted_values
-
-
-# removes unnecessary parameters/steps (ie. using softmax attention vectors which make little sense for global attention)
-class FastSelfAttention(nn.Module):
+    
+    
+class CausalConvolution(nn.Module):
+    def __init__(self, hidden_size, kernel_size, groups):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.convolutional_layer = nn.Conv1d(hidden_size, hidden_size, groups = groups,
+                                             kernel_size = kernel_size, padding = 0)
+        
+    def forward(self, hidden_states):
+        # batch len, seq len, embedding -> batch len, embedding, seq len
+        mod = hidden_states.permute(0, 2, 1)
+        
+        # padding for casual convolution
+        mod = F.pad(mod, pad=(self.kernel_size-1, 0), mode='constant', value=0)
+        mod = self.convolutional_layer(mod)
+        
+        # unpermute
+        mod = mod.permute(0, 2, 1)
+        
+        return mod
+    
+    
+class ReducedFastSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.input_dim = config.hidden_size
-        self.query = nn.Linear(self.input_dim, self.input_dim)
-        self.keys = nn.Linear(self.input_dim, self.input_dim)
-        self.values = nn.Linear(self.input_dim, self.input_dim)
         
-        self.attn_norm = nn.LayerNorm(self.input_dim)
+        if config.convolve is True:
+            self.keys = CausalConvolution(config.hidden_size, config.kernel_size, config.groups)
+            self.key_att = CausalConvolution(config.hidden_size, config.kernel_size, config.groups)
+            self.values = CausalConvolution(config.hidden_size, config.kernel_size, config.groups)
+        else:
+            self.keys = nn.Linear(config.hidden_size, config.hidden_size)
+            self.key_att = nn.Linear(config.hidden_size, config.hidden_size)
+            self.values = nn.Linear(config.hidden_size, config.hidden_size)
+        
+        self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, attention_mask):
         hidden_states = self.attn_norm(hidden_states)
         
-        batch_size, seq_len, _ = hidden_states.shape
-        query = self.query(hidden_states)
+        batch_size, seq_len, d_model = hidden_states.shape
         keys = self.keys(hidden_states)
         values = self.values(hidden_states)
-        scaling_vec = torch.arange(1, seq_len+1, device=hidden_states.device, requires_grad=False).reshape(1, -1, 1)
         
-        pooled_query = torch.cumsum(query, dim = 1) / scaling_vec
-
-        mixed_keys = pooled_query * keys
-        pooled_keys = torch.cumsum(mixed_keys, dim = 1) / scaling_vec
+        # equation (5) manual (causal) softmax
+        keys_weight = torch.exp(self.key_att(keys) / d_model**.5)
+        keys_weight = keys_weight / torch.cumsum(keys_weight, dim = 1)
         
-        weighted_value = pooled_keys * values
+        # equation (6)
+        pooled_keys = torch.cumsum(keys_weight * keys, dim = 1)
+        
+        # corresponds to "u_i = k * v_i" in paper
+        weighted_values = pooled_keys * values
+        
+        # dropout last like megatron
+        weighted_values = self.attn_dropout(weighted_values)
       
-        return weighted_value
+        return weighted_values
 
 
 class FastformerLayer(nn.Module):
     def __init__(self, config):
         super(FastformerLayer, self).__init__()
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
         
-        self.convolve = False
-        if config.convolve is True:
-            self.convolve = True
-            self.kernel_size = config.kernel_size
-            self.conv = nn.Conv1d(config.hidden_size, config.hidden_size,
-                                  groups = config.groups, kernel_size = self.kernel_size, padding = 0)
-            self.conv_norm = nn.LayerNorm(config.hidden_size)
+        self.convolve = config.convolve
         
-        if config.old_attention is True:
-            self.attention = OldFastSelfAttention(config)
+        if config.reduced_attention is True:
+            self.attention = ReducedFastSelfAttention(config)
         else:
             self.attention = FastSelfAttention(config)
 
@@ -111,47 +135,29 @@ class FastformerLayer(nn.Module):
         self.gelu = nn.GELU()
         self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
+        self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
     
     def forward(self, hidden_states, attention_mask):
         mod = hidden_states
-        
-        if self.convolve:
-            # convolutional attention
-            mod = mod + self.__convolve(mod)
-        
-        # cumsum attention
+
         mod = mod + self.attention(mod, attention_mask)
         
         mod = mod + self.__boom(mod)
         
         return mod
-    
-    def __convolve(self, hidden_states):
-        hidden_states = self.conv_norm(hidden_states)
-        
-        # batch len, seq len, embedding -> batch len, embedding, seq len
-        batch_len, _, embedding_len = hidden_states.shape
-        conv_attention = hidden_states.permute(0, 2, 1)
-        
-        # padding
-        conv_attention = F.pad(conv_attention, pad=(self.kernel_size-1, 0), mode='constant', value=0)
-        conv_attention = self.conv(conv_attention)
-        
-        # unpermute
-        conv_attention = conv_attention.permute(0, 2, 1)
-        
-        conv_attention = self.dropout(conv_attention)
-        
-        return conv_attention
-    
+
     def __boom(self, hidden_states):
         mod = self.boom_norm(hidden_states)
         mod = self.boom(mod)
         mod = self.gelu(mod)
         mod = self.unboom(mod)
         
-        mod = self.dropout(mod)
-        
+        # possible parameter saving like SHA-RNN
+        # mod = torch.stack(mod.chunk(4, dim = -1), dim = -1).sum(dim = -1)
+
+        if self.convolve is True:
+            mod = self.boom_drop(mod)
+
         return mod
 
 
@@ -193,14 +199,14 @@ class FastformerDecoder(nn.Module):
         embeddings = input_embs + position_embeddings
         
         embeddings = self.LayerNorm(embeddings)
-        embeddings = self.dropout(embeddings)
-        #all_hidden_states = [embeddings]
+        
+        if self.config.convolve:
+            embeddings = self.dropout(embeddings)
         
         layer_outputs = embeddings
         for i, layer_module in enumerate(self.decoders):
             layer_outputs = layer_module(layer_outputs, extended_attention_mask)
-            #all_hidden_states.append(layer_outputs)
-        
+
         return self.proj_logits(layer_outputs)
     
 
