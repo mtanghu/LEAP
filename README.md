@@ -7,16 +7,18 @@ The general concept of Additive Attention is that is instead of allowing each em
 
 Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
 
-Consider a sequence of (possibly transformed) embeddings $x_i$ with $i$ from 1 to N…
+Consider a sequence of (possibly transformed) embeddings $\bf{{x_i}}$ with $i$ from 1 to N…
 
 1.  Get an “attention weight” a<sub>i</sub> (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
+
 $$
 \begin{align}
 	\alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
-2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\bf{g}$ that contains information about the entire sequence, i.e.
+2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\bf{{g}}$ that contains information about the entire sequence, i.e.
+
 $$ 
 \begin{align}
 	\mathbf{g} = \sum_{\ell=1}^{N} \alpha_\ell \mathbf{x_\ell}
@@ -32,6 +34,7 @@ Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $
 Causal Language Modeling or decoder-based language modeling is where a language model is tasked with *generating* the next token given all previous tokens, though training is performed in parallel with all tokens present in training, BUT token embeddings are not allowed to receive information about future tokens. This restriction presents a challenge because, at a high level, a global attention vector that confers information about the entire sequence to each individual token embedding will certainly allow a token embedding to “see into the future” unduly. To remedy this, we need to create an equivalent sequence of global attention vectors, one for each token, that only contains sequence information **up to each token**.
 
 To do this rigorously, let's start by substituting equation (1) into equation (2)
+
 $$
 \begin{align}
 	\mathbf{g} = \sum_{\ell=1}^{N}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
@@ -39,7 +42,8 @@ $$
 $$
 
 
-Now instead of creating a single global attention vector $\bf{g}$, let us instead create $\bf{g_i}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now instead of creating a single global attention vector $\bf{{g}}$, let us instead create $\bf{{g_i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+
 $$
 \begin{align}
 	\mathbf{g_i} = \sum_{\ell=1}^{i}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
