@@ -1,5 +1,5 @@
 # Additive Attention Is Not All You Need?
-This curiostiy project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains the model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook.
+This curiosity project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains the model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook.
 
 ## Brief Explanation of Additive Attention
 
@@ -10,21 +10,20 @@ Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu
 Consider a sequence of (possibly transformed) embeddings $x_i$ with $i$ from 1 to N…
 
 1.  Get an “attention weight” a<sub>i</sub> (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
-	$$
-	\begin{align}
-		\alpha_i =  \frac{exp(\mathbf{w}^T \mathbf{x_i} / \sqrt{d_{model}})}{\sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}
-	\end{align}
-	$$
+$$
+\begin{align}
+	\alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
+\end{align}
+$$
 
-2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\mathbf{g}$ that contains information about the entire sequence, i.e.
+2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\bf{g}$ that contains information about the entire sequence, i.e.
+$$ 
+\begin{align}
+	\mathbf{g} = \sum_{\ell=1}^{N} \alpha_\ell \mathbf{x_\ell}
+\end{align}
+$$
 
-	$$ 
-	\begin{align}
-		\mathbf{g} = \sum_{\ell=1}^{N} \alpha_\ell \mathbf{x_\ell}
-	\end{align}
-	$$
-
-Which is clearly $O(N)$ or linear in time complexity w.r.t sequence length
+Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $N$.
   
 \* Not to be confused with [Additive Attention by Bahdanau et al. 2014](https://arxiv.org/abs/1409.0473v7)
 
@@ -33,28 +32,26 @@ Which is clearly $O(N)$ or linear in time complexity w.r.t sequence length
 Causal Language Modeling or decoder-based language modeling is where a language model is tasked with *generating* the next token given all previous tokens, though training is performed in parallel with all tokens present in training, BUT token embeddings are not allowed to receive information about future tokens. This restriction presents a challenge because, at a high level, a global attention vector that confers information about the entire sequence to each individual token embedding will certainly allow a token embedding to “see into the future” unduly. To remedy this, we need to create an equivalent sequence of global attention vectors, one for each token, that only contains sequence information **up to each token**.
 
 To do this rigorously, let's start by substituting equation (1) into equation (2)
-
 $$
 \begin{align}
-	\mathbf{g} = \sum_{\ell=1}^{N}  \frac{exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}})}{\sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
+	\mathbf{g} = \sum_{\ell=1}^{N}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
 \end{align}
 $$
 
 
-Now instead of creating a single global attention vector $\mathbf{g}$, let us instead create $\mathbf{g_i}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
-
+Now instead of creating a single global attention vector $\bf{g}$, let us instead create $\bf{g_i}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 $$
 \begin{align}
-	\mathbf{g_i} = \sum_{\ell=1}^{i}  \frac{exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}})}{\sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
+	\mathbf{g_i} = \sum_{\ell=1}^{i}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
 \end{align}
 $$
 
 
-Though we may have an a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time to calculate $\mathbf{g}$, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
+Though we may have an a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time to calculate $\bf{g}$, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
 \begin{align}
-	\mathbf{g_i} =  \frac{\sum_{\ell=1}^{i}exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) *\mathbf{x_\ell}}{\sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}
+	\mathbf{g_i} =  {\sum_{\ell=1}^{i}exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) *\mathbf{x_\ell} \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
@@ -74,7 +71,7 @@ $$
 
 $$
 \begin{align}
-\mathbf{g_i} = \frac{\mathbf{s_i}}{z_i}
+\mathbf{g_i} = {\mathbf{s_i} \over z_i}
 \end{align}
 $$
 
