@@ -1,3 +1,26 @@
+Welcome file
+Who has access
+Not shared
+System properties
+Type
+Text
+Size
+10 KB
+Storage used
+10 KB
+Location
+My Drive
+Owner
+me
+Modified
+1:28 AM by me
+Opened
+1:28 AM by me
+Created
+Apr 15, 2022 with StackEdit
+Add a description
+Viewers can download
+
 # Additive Attention Is Not All You Need?
 This curiosity project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains the model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook.
 
@@ -7,21 +30,21 @@ The general concept of Additive Attention is that is instead of allowing each em
 
 Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
 
-Consider a sequence of (possibly transformed) embeddings $\bf{{x_i}}$ with $i$ from 1 to N…
+Consider a sequence of (possibly transformed) embeddings $\bf{x_i}$ with $i$ from 1 to N…
 
-1.  Get an “attention weight” a<sub>i</sub> (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
+1.  Get an “attention weight” $\alpha_i$ (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
 
 $$
 \begin{align}
-	\alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
+	(1)\ \alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
-2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\bf{{g}}$ that contains information about the entire sequence, i.e.
+2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\bf{g}$ that contains information about the entire sequence, i.e.
 
 $$ 
 \begin{align}
-	\mathbf{g} = \sum_{\ell=1}^{N} \alpha_\ell \mathbf{x_\ell}
+	(2)\ \mathbf{g} = \sum_{\ell=1}^{N} \alpha_\ell \mathbf{x_\ell}
 \end{align}
 $$
 
@@ -37,16 +60,16 @@ To do this rigorously, let's start by substituting equation (1) into equation (2
 
 $$
 \begin{align}
-	\mathbf{g} = \sum_{\ell=1}^{N}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
+	(3)\ \mathbf{g} = \sum\limits_{\ell=1}^{N}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
 \end{align}
 $$
 
 
-Now instead of creating a single global attention vector $\bf{{g}}$, let us instead create $\bf{{g_i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now instead of creating a single global attention vector ${\bf{g}}$, let us instead create ${\bf{g_i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
 \begin{align}
-	\mathbf{g_i} = \sum_{\ell=1}^{i}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
+	(4)\ \mathbf{g_i} = \sum\limits_{\ell=1}^{i}  {exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}*\mathbf{x_\ell}
 \end{align}
 $$
 
@@ -55,7 +78,7 @@ Though we may have an a time complexity issue. The original Additive Attention m
 
 $$
 \begin{align}
-	\mathbf{g_i} =  {\sum_{\ell=1}^{i}exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) *\mathbf{x_\ell} \over \sum_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}
+	(5)\ \mathbf{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\mathbf{w}^T \mathbf{x_\ell} / \sqrt{d_{model}}) *\mathbf{x_\ell} \over \sum\limits_{j=1}^{i} exp(\mathbf{w}^T \mathbf{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
@@ -63,19 +86,19 @@ Where the summation terms in the numerator and denominator for each $i$ can be c
 
 $$
 \begin{align}
-\mathbf{s_i} = \mathbf{s_{i-1}} +exp(\mathbf{w}^T \mathbf{x_i} / \sqrt{d_{model}}) *\mathbf{x_i}
+	(6)\ \mathbf{s_i} = \mathbf{s_{i-1}} +exp(\mathbf{w}^T \mathbf{x_i} / \sqrt{d_{model}}) *\mathbf{x_i}
 \end{align}
 $$
 
 $$
 \begin{align}
-z_i = z_{i-1} +exp(\mathbf{w}^T \mathbf{x_i} / \sqrt{d_{model}}) 
+	(7)\ z_i = z_{i-1} +exp(\mathbf{w}^T \mathbf{x_i} / \sqrt{d_{model}}) 
 \end{align}
 $$
 
 $$
 \begin{align}
-\mathbf{g_i} = {\mathbf{s_i} \over z_i}
+	(8)\ \mathbf{g_i} = {\mathbf{s_i} \over z_i}
 \end{align}
 $$
 
