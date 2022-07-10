@@ -13,7 +13,7 @@ Consider a sequence of (possibly transformed) embeddings $\bf{x_i}$ with $i$ fro
 
 $$
 \begin{align}
-	(1)\ \alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
+	(1)\ \alpha_i =  {exp(\bf{w}^T \bf{x_i} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\bf{w}^T \bf{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
@@ -42,7 +42,7 @@ $$
 $$
 
 
-Now instead of creating a single global attention vector $\bf{g}$${}$, let us instead create $\bf{g_i}$${}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now instead of creating a single global attention vector $\bf{g}$ $\bf{}$, let us instead create $\bf{g_i}$ $\bf{}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
 \begin{align}
