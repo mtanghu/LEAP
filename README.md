@@ -1,26 +1,3 @@
-Welcome file
-Who has access
-Not shared
-System properties
-Type
-Text
-Size
-10 KB
-Storage used
-10 KB
-Location
-My Drive
-Owner
-me
-Modified
-1:28 AM by me
-Opened
-1:28 AM by me
-Created
-Apr 15, 2022 with StackEdit
-Add a description
-Viewers can download
-
 # Additive Attention Is Not All You Need?
 This curiosity project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains the model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook.
 
@@ -65,7 +42,7 @@ $$
 $$
 
 
-Now instead of creating a single global attention vector ${\bf{g}}$, let us instead create ${\bf{g_i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now instead of creating a single global attention vector $\bf{g}$${}$, let us instead create $\bf{g_i}$${}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
 \begin{align}
