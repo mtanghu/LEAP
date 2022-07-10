@@ -1,7 +1,7 @@
 # Additive Attention Is Not All You Need?
 This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains a HuggingFace compatible model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook where integration with HuggingFace is shown.
 
-The purpose of this project was to see whether the state-of-the-art results shown in the original paper would translate to Causal Language Modeling. As you'll see, Additive Attention falls short, though the later sections will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process.
+The purpose of this project was to see whether the state-of-the-art results shown in the original paper would translate to Causal Language Modeling. This README will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process as well as preliminary results.
 
 ## Brief Explanation of Additive Attention
 
