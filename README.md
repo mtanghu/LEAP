@@ -1,9 +1,11 @@
 # Additive Attention Is Not All You Need?
 This curiosity project adapts Additive Attention described by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains a HuggingFace compatible model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook where integration with HuggingFace is shown.
 
+The purpose of this project was to see whether the state-of-the-art results shown in the original paper would translate to Causal Language Modeling. As you'll see, Additive Attention falls short, though the later sections will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process.
+
 ## Brief Explanation of Additive Attention
 
-The general concept of Additive Attention is that is instead of allowing each embedded token to attend to every other embedded token (which is N^2 complexity where N is the sequence length), Additive Attention* relies on “global attention vectors” which condense information about the entire sequence into a single vector through addition/summation (giving the name “Additive Attention”*). A global attention vector then confers information about the entire sequence to individual embeddings through pointwise multiplying the global attention vector with each embedding vector. The specifics of this last step and other structural details are best explained [in the original paper]([https://arxiv.org/pdf/2108.09084.pdf](https://arxiv.org/pdf/2108.09084.pdf)). We will however dive deeper into the Additive Attention mechanism itself as we will need to adapt it for causal language modeling rather than classification (as was the purpose of the original paper).
+The general concept of Additive Attention is that is instead of allowing each embedded token to attend to every other embedded token (which is N^2 complexity where N is the sequence length), Additive Attention* relies on “global attention vectors” which condense information about the entire sequence into a single vector through addition/summation (giving the name “Additive Attention”*). A global attention vector then confers information about the entire sequence to individual embeddings through pointwise multiplying the global attention vector with each embedding vector. The specifics of this last step and other structural details are best explained [in the original paper]([https://arxiv.org/pdf/2108.09084.pdf](https://arxiv.org/pdf/2108.09084.pdf)). We will however dive deeper into the Additive Attention mechanism itself as we will need to adapt it for causal language modeling rather than classification (as was the purpose of the original paper)
 
 Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
 
@@ -93,7 +95,8 @@ A 1D convolution was added as a layer into the transformer architecture with a r
 While the training scheme used is preliminary (wikitext-2 with a character tokenizer), the tests are still even for all models and it should be relatively clear that there is a clear gap between Additive Attention and full attention (we use [GPT2](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) by RWCLAS 2018). It may be possible that Additive Attention could compare favorably with other linear attention mechanisms on certain tasks, though this is unexplored currently.
 
 ![alt text](https://github.com/mtanghu/Additive-Attention-Is-Not-All-You-Need-Maybe/blob/main/results.png?raw=True)
-Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green). The "Convolutional Additive Attention" employs the changes described in the mini-section "Causal Convolution".
+
+Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green). The "Convolutional Additive Attention" employs the changes described in the mini-section "Causal Convolution". To speculate on why Additive Attention is so lackluster, the results in the original paper were for classification with a [BERT](https://arxiv.org/abs/1810.04805) style model where only global summarization of a sequence is needed (like how a normal CLS token/accumulation does) and the Additive Attention mechanism just implements this prior. This may not be suffient for Causal Language Modeling as each token may need very specific information about other tokens and not just a global summary.
 
 ### Soft lessons
 - It was interesting to see the "gap" in the validation losses both graphically and being the one actually running the models. In papers it might just seem like a benchmark has been "improved" by some arbitrary amount, but this project has helped me appreciate how non-trivial positive results are.
@@ -101,11 +104,13 @@ Plotted is the validation bits per character of the Additive Attention models (b
 - Something that I've experienced already but this project reaffirmed strongly: a lot happens in the experimental process, most of it unexpected! Experiments often didn't go the way one might think even though previous results in other papers would suggest certain results. I think it's important to accept this and quickly adjust to a new plan that hopefully is even better than the previous since now more information is known!
 
 ## References
+Devlin, J., Chang, M. W., Lee, K., & Toutanova, K. (2018). Bert: Pre-training of deep bidirectional transformers for language understanding. _arXiv preprint arXiv:1810.04805_.
+
+Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020, November). Transformers are rnns: Fast autoregressive transformers with linear attention. In _International Conference on Machine Learning_ (pp. 5156-5165). PMLR.
+
 Wu, C., Wu, F., Qi, T., Huang, Y., & Xie, X. (2021). Fastformer: Additive attention can be all you need. _arXiv preprint arXiv:2108.09084_.
 
 Bahdanau, D., Cho, K., & Bengio, Y. (2014). Neural machine translation by jointly learning to align and translate. _arXiv preprint arXiv:1409.0473_.
-
-Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020, November). Transformers are rnns: Fast autoregressive transformers with linear attention. In _International Conference on Machine Learning_ (pp. 5156-5165). PMLR.
 
 Shoeybi, M., Patwary, M., Puri, R., LeGresley, P., Casper, J., & Catanzaro, B. (2019). Megatron-lm: Training multi-billion parameter language models using model parallelism. _arXiv preprint arXiv:1909.08053_.
 
