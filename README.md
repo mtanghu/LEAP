@@ -42,7 +42,7 @@ $$
 $$
 
 
-Now instead of creating a single global attention vector $\boldsymbol{g}$, let us instead create $\boldsymbol{g_i}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now let us instead create $\boldsymbol{g_i}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
 \begin{align}
@@ -51,7 +51,7 @@ $$
 $$
 
 
-Though we may have an a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time to calculate $\boldsymbol{g}$, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
+Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
 \begin{align}
