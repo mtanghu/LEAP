@@ -15,7 +15,7 @@ Consider a sequence of (possibly transformed) embeddings $\boldsymbol{x_i}$ with
 
 $$
 \begin{align}
-	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
+	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
 \end{align}
 $$
 
