@@ -23,7 +23,7 @@ $$
 
 $$ 
 \begin{align}
-	(2)\ \boldsymbol{g} = \sum_{\ell=1}^{N} \alpha_\ell \boldsymbol{x_\ell}
+	(2)\ \boldsymbol{g} = \sum_{i=1}^{N} \alpha_\ell \boldsymbol{x_i}
 \end{align}
 $$
 
