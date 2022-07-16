@@ -184,6 +184,7 @@ class FastformerForCausalLM(torch.nn.Module):
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.fastformer_model = FastformerDecoder(config)
         self.criterion = nn.CrossEntropyLoss(label_smoothing = .1)
+        self.eval_criterion = nn.CrossEntropyLoss(label_smoothing = 0)
         
         # weight tying
         self.proj_logits.weight = self.word_embedding.weight
@@ -192,5 +193,10 @@ class FastformerForCausalLM(torch.nn.Module):
         embds=self.word_embedding(input_ids)
         layer_outputs = self.fastformer_model(embds, attention_mask)
         logits = self.proj_logits(layer_outputs)
-        loss = self.criterion(logits.view(-1, self.config.vocab_size), labels.view(-1)) 
+        
+        if self.training():
+            loss = self.criterion(logits.view(-1, self.config.vocab_size), labels.view(-1))
+        else:
+            loss = self.eval_criterion(logits.view(-1, self.config.vocab_size), labels.view(-1))
+
         return loss, logits
