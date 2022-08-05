@@ -12,14 +12,19 @@ class FastSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.n_heads = config.n_heads
+        assert config.hidden_size % self.n_heads == 0, "hidden_size is not divisible by n_heads"
+        self.head_size = config.hidden_size // self.n_heads
         
         # only considering single head for now
         self.Wquery = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.query_att = nn.Linear(config.hidden_size, 1, bias = False)
+        self.query_attn = nn.Parameter(torch.zeros(config.hidden_size))
         self.Wkeys = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.key_att = nn.Linear(config.hidden_size, 1, bias = False)
-        #self.Wvalues = nn.Linear(config.hidden_size, config.hidden_size)
+        self.key_attn = nn.Parameter(torch.zeros(config.hidden_size))
+        self.Wvalues = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        self.attn_proj = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         
+        self.gelu = nn.GELU()
         self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.mid_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -27,25 +32,21 @@ class FastSelfAttention(nn.Module):
 
     def forward(self, hidden_states, attention_mask):
         hidden_states = self.attn_norm(hidden_states)
-        
-        batch_size, seq_len, d_model = hidden_states.shape
+
         query = self.Wquery(hidden_states)
         keys = self.Wkeys(hidden_states)
-        # values = self.Wvalues(hidden_states)
-        
-        # parameter saving described at the end of section 3.1
-        values = query
+        values = self.Wvalues(hidden_states)
         
         attention_mask = attention_mask.to(dtype=next(self.parameters()).dtype)  # fp16 compatibility
         attention_mask = (1.0 - attention_mask) * -10000.0
         attention_mask = attention_mask.unsqueeze(2)
         
-        # equations (3-4) done causally masking out pad tokens
-        query_weight = self.query_att(query) / d_model**.5
-        query_weight += attention_mask
-        query_weight = torch.exp(query_weight)
-        pooled_query = torch.cumsum(query_weight * query, dim = 1) / torch.cumsum(query_weight, dim = 1)
+        # equations (3-4)
+        pooled_query = self.__additive_attn(query, self.query_attn, attention_mask)
+        
+        # projection after multihead attention like original transformer
         pooled_query = self.attn_dropout(pooled_query)
+        pooled_query = self.attn_proj(pooled_query)
         
         # corresponds to "p_i = q * k_i" in paper
         mixed_keys = pooled_query * keys
@@ -54,17 +55,42 @@ class FastSelfAttention(nn.Module):
         residual = hidden_states + mixed_keys
         mixed_keys = self.mid_norm(residual)
         
-        # equations (5-6) done causally masking out pad tokens
-        keys_weight = self.key_att(mixed_keys) / d_model**.5
-        keys_weight += attention_mask
-        keys_weight = torch.exp(keys_weight)
-        pooled_keys = torch.cumsum(keys_weight * mixed_keys, dim = 1) / torch.cumsum(keys_weight, dim = 1)
+        # equations (5-6)
+        pooled_keys = self.__additive_attn(mixed_keys, self.key_attn, attention_mask)
+        
+        # no projection here to save parameters
         pooled_keys = self.attn_dropout(pooled_keys)
         
         # corresponds to "u_i = k * v_i" in paper
         weighted_values = pooled_keys * values
 
-        return weighted_values
+        # residual connection here since there are 2 rounds of additive attention
+        return residual + weighted_values
+    
+    
+    def __additive_attn(self, x, learned_vector, attention_mask):
+        '''This function implements equations 3-4 which are the same as equations 5-6'''
+        
+        batch_size, seq_len, hidden_size = x.shape
+                
+        # manual dot product (for multihead attention)
+        attn = x * learned_vector
+        attn = attn.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        attn = attn.sum(dim = -1) / self.head_size**.5 # scaling
+        
+        # masking out pad tokens
+        attn += attention_mask
+        
+        # manual softmax and cumulative sum
+        attn = torch.exp(attn)
+        attn = attn.unsqueeze(3)
+        x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        x = torch.cumsum(attn * x, dim = 1) / torch.cumsum(attn, dim = 1)
+        
+        # concat everything back together
+        x = x.reshape(batch_size, seq_len, hidden_size)
+        
+        return x
 
 
 
@@ -76,7 +102,7 @@ class CausalConvolution(nn.Module):
                                              kernel_size = kernel_size, padding = 0, bias = False)
         self.conv_norm = nn.LayerNorm(hidden_size)
         self.conv_drop = nn.Dropout(dropout)
-        
+
         
     def forward(self, hidden_states):
         # layer norms still makes sense like "A ConvNet for the 2020s"
@@ -110,9 +136,9 @@ class FastformerLayer(nn.Module):
         
         self.attention = FastSelfAttention(config)
 
-        self.boom = nn.Linear(config.hidden_size, config.hidden_size*4)
+        self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
         self.gelu = nn.GELU()
-        self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size)
+        self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size, bias = False)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
@@ -124,7 +150,7 @@ class FastformerLayer(nn.Module):
             mod = mod + self.convolutional_layer(mod)
         
         # residual connection is handled by attention layer
-        mod = mod + self.attention(mod, attention_mask)
+        mod = self.attention(mod, attention_mask)
         
         mod = mod + self.__boom(mod)
         
@@ -212,7 +238,7 @@ class FastformerForCausalLM(PreTrainedModel):
         
         embds=self.word_embedding(input_ids)
         layer_outputs = self.fastformer_model(embds, attention_mask)
-        logits = self.proj_logits(layer_outputs)
+        logits = self.proj_logits(layer_outputs) / self.config.hidden_size**.5
         
         loss = None
         if labels is not None:

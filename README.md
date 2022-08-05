@@ -1,7 +1,59 @@
-# Additive Attention Is Not All You Need?
-This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. This repo will show some preliminary experiments which explore linear attention and how maybe additive attention doesn't quite work that well for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. ``fastformer.py`` contains a HuggingFace compatible model and the different layers that go into it. ``FastLM.ipynb`` is the training/testing notebook where integration with HuggingFace is shown.
+# Additive Attention Is All You Need?
+This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. 
 
-The purpose of this project was to see whether the state-of-the-art results shown in the original paper would translate to Causal Language Modeling. This README will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process as well as preliminary results.
+This README will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process/math as well as preliminary results which show that Additive Attention is potentially comparable to full attention, and there is room for development!
+
+## Usage & Development
+
+Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/))
+
+```bash
+git clone https://github.com/mtanghu/Additive-Attention-Is-All-You-Need.git
+cd Additive-Attention-Is-All-You-Need
+pip install .
+```
+
+Then to use in python (setting the config how you want):
+```python
+from fastformer import FastformerForCausalLM, FastformerLMConfig
+
+config = FastformerLMConfig(
+    hidden_size = 256, # size of embeddings
+    vocab_size = 384, # number of tokens, if you have a tokenizer use len(tokenizer) instead
+    max_position_embeddings = 256, # max number of tokens to process at once
+    n_heads = 4 # number of heads to use in multi-head attention
+    convolve = False, # whether to employ a convolutional layer (note: will increase parameter count)
+    groups = 2, # number of groups in convolution layer (ignored if convolve = False) 
+    kernel_size = 4, # kernel size for convolution layer (ignored if convolve = False) 
+    num_hidden_layers = 6, # how many stacked decoder layers to use
+    label_smoothing = .1, # amount of label smoothing to use
+    initializer_range = .02, # standard deviation for weight initialization
+    hidden_dropout_prob = .1 # dropout value used for embeddings, attention, and feedforward layers
+)
+
+model = FastformerForCausalLM(config)
+
+# this model is compatible with huggingface and its "trainer" interface
+from transformers import Trainer
+trainer = Trainer(
+    model=model,
+    train_dataset=<YOUR DATASET>
+)
+
+trainer.train()
+```
+A more complete toy training example with a dataset and evaluations can be found at ``FastLM.ipynb`` in this repository.
+
+### Development
+A number possibilities for development and usage come to mind:
+
+1. Additive Attention may work better on other & more specific NLP tasks (Question Answering, Summarization, etc.) as per the [No Free Lunch Theorem](https://en.wikipedia.org/wiki/No_free_lunch_theorem) which especially applies to unique datasets. Other Linear Attention papers seem to use unique datasets.
+2. Maybe more ablation and feature adding studies could be performed to improve performance
+3. To help with scalability maybe [local attention](https://github.com/lucidrains/local-attention) could  be used instead of convolution
+4. Additive Attention only has global attention (and this project also implements local attention with convolution) and thus may be an interesting model to play around with for exploring attentional mechanisms.
+5. Visual Transformers may only need the kind of "global attention" that made Additive Attention SOTA for classification in the original paper. Thus for causal image generation, this project may work.
+6. Testing on the [Long Range Arena](https://github.com/google-research/long-range-arena), it may be possible for Additive Attention to achieve SOTA on some of the benchmarks.
+
 
 ## Brief Explanation of Additive Attention
 
@@ -53,7 +105,7 @@ $$
 $$
 
 
-Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
+Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent** of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
 \begin{align}
@@ -81,26 +133,42 @@ $$
 \end{align}
 $$
 
+**Note that Katharpoulos et al. didn't quite have the same process, they instead had to use a kernel to approximate the similarity scores of the keys and queries (and the associativity property) and likewise didn't and couldn't use a softmax. This Additive Attention math still uses a softmax, but the similarity between the two approaches/styles is how they both come from rewriting the equations and using some simplification techniques to achieve linear in complexity attention that can be represented as an RNN.
+
 ## Model Structure
-Because this is a causal language model, the code follows the structure/ordering of [MegatronLM](https://arxiv.org/pdf/1909.08053.pdf) by Shoeybi, Patwary & Puri et al. 2020. Standard practices like learned positional embeddings ([Radford et al. 2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf), weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) and label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)) are also used.
+Because this is a causal language model the code is structured like one and implements the following:
+
+-  Ordering of residual connections, layer norms and dropouts follows [MegatronLM](https://arxiv.org/pdf/1909.08053.pdf) by Shoeybi, Patwary & Puri et al. 2020.
+- Learned positional embeddings ([Radford et al. 2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf), though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2.
+- Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3))
+- Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)) are also used. (Though huggingface seems to oddly apply label smoothing during validation as well so later experiments will forgo label smoothing)
+- Attention masking of pad tokens ([Viswani et al. 2017](https://arxiv.org/abs/1706.03762))
+- Scaling output projection (right before softmax) by $\frac{1}{\sqrt{d_{model}}}$ and no biases on linear layers (except for output projection) like [PALM](https://arxiv.org/pdf/2204.02311.pdf)
+- Due to some training instability, a residual connection and layer norm was placed in the middle of the full additive attention process 
 
 ### Causal Convolution
-An attempt was made to try to model local contexts better (since the Additive Attention mechanism only models global sequence information) using a "causal convolutional layer" somewhat inspired by [CNN Is All You Need](https://arxiv.org/abs/1712.09662) by Qimeng Chen & Ren Wu 2017. Though it didn't seem to improve performance (surprisingly?) so the description will be brief.
+An attempt was made to try to model local contexts better (since the Additive Attention mechanism only models global sequence information) using a "causal convolutional layer" somewhat inspired by [CNN Is All You Need](https://arxiv.org/abs/1712.09662) by Qimeng Chen & Ren Wu 2017. This section will be brief though as convolution may be replaced with [local attention](https://github.com/lucidrains/local-attention) at some point.
 
 A 1D convolution was added as a layer into the transformer architecture with a residual connection and layernorm/dropout just as the attentional/feed-forward layers have in the [MegatronLM](https://arxiv.org/pdf/1909.08053.pdf) transformer architecture. This layer was placed before the attentional layer. Furthermore, to keep the "causal" property while maintaining parallelism, we pad the sequence dimension with zero vectors at the start of the sequence ($kernel\ size - 1$ of them). The effect is that as the "kernel"/window slides across the sequence each output $i$ will only have information from embedding up $i$-th token embedding.
 
 (Note: a number of adaptations were tried like removing/moving a gelu layer, removing dropout as is usual for CNNs, replacing key/query/value transformations with CNNs, etc. none of which particularly improved results)
 
 ## Results
-While the training scheme used is preliminary (wikitext-2 with a character tokenizer), the tests are still even for all models and it should be relatively clear that there is a clear gap between Additive Attention and full attention (we use [GPT2](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) by RWCLAS 2018). It may be possible that Additive Attention could compare favorably with other linear attention mechanisms on certain tasks, though this is unexplored currently.
 
-![alt text](https://github.com/mtanghu/Additive-Attention-Is-Not-All-You-Need-Maybe/blob/main/results.png?raw=True)
+![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/results.png?raw=True)
 
-Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green). The "Convolutional Additive Attention" employs the changes described in the mini-section "Causal Convolution". To speculate on why Additive Attention is so lackluster, the results in the original paper were on classification tasks with a [BERT](https://arxiv.org/abs/1810.04805) style model where (potentially) only global summarization of a sequence is needed (like how a normal CLS token/accumulation does) and the Additive Attention mechanism just implements this as a prior. This may not be sufficent for Causal Language Modeling as each token may need very specific information about other tokens and not just a global summary.
+Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green). The "Convolutional Additive Attention" employs the changes described in the mini-section "Causal Convolution".
 
-### Soft lessons
-- It was interesting to see the "gap" in the validation losses both graphically and being the one actually running the models. In papers it might just seem like a benchmark has been "improved" by some arbitrary amount, but this project has helped me appreciate how non-trivial positive results are.
-- I made a few mistakes in adapting Additive Attention to Causal Language Modeling mostly just spurred from ignorance. I can see the value/necessity of going over the math and checking the math (as the Additive Attention for Causal Language Modeling section does) for ensuring accuracy in this kind of Neural Netwo(rk context.
+### Training details
+
+All trained on a single NVIDIA GeForce RTX 2060 on Wikitext-2 using a T5 tokenizer with maximum sequence length of 1024 and batch size 4
+
+Model details: all models had a model dimension of 256 (feedforward dimension is 4x the model dimension), 4 attention heads, 4 layers (though the convolutional additive attention only has 3 to fit the convolutional layer) and dropout probability of .1 on embedding, attention and feedforward layers. The convolutional layer had a kernel size of 4,
+
+Optimizer: [AdamW](https://arxiv.org/abs/1711.05101) with learning rate of 1e-3 to start and linear annealing, betas=(.9,.999), weight decay = .01
+
+### Soft Lessons
+- I made a few mistakes in adapting Additive Attention to Causal Language Modeling mostly just spurred from ignorance. I can see the value/necessity of going over the math and checking the math (as the Additive Attention for Causal Language Modeling section does) for ensuring accuracy in this kind of Neural Network context.
 - Something that I've experienced already but this project reaffirmed strongly: a lot happens in the experimental process, most of it unexpected! Experiments often didn't go the way one might think even though previous results in other papers would suggest certain results. I think it's important to accept this and quickly adjust to a new plan that hopefully is even better than the previous since now more information is known!
 
 ## References
@@ -118,8 +186,12 @@ Müller, R., Kornblith, S., & Hinton, G. E. (2019). When does label smoothing he
 
 Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. _Advances in neural information processing systems, 30_.
 
+Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra, G., Roberts, A., ... & Fiedel, N. (2022). Palm: Scaling language modeling with pathways. _arXiv preprint arXiv:2204.02311_
+
 Radford, A., Narasimhan, K., Salimans, T., & Sutskever, I. (2018). Improving language understanding by generative pre-training.
 
 Press, O., & Wolf, L. (2016). Using the output embedding to improve language models. _arXiv preprint arXiv:1608.05859_.
 
 Chen, Q., & Wu, R. (2017). CNN is all you need. _arXiv preprint arXiv:1712.09662_.
+
+Loshchilov, I., & Hutter, F. (2017). Decoupled weight decay regularization. _arXiv preprint arXiv:1711.05101_.
