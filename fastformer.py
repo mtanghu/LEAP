@@ -209,8 +209,16 @@ class FastformerDecoder(nn.Module):
 # Create configuation compatible with HuggingFace
 class FastformerLMConfig(PretrainedConfig):
     model_type = "FastformerForCausalLM"
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
+                 max_position_embeddings = 1024, groups = 1, kernel_size = 4,
+                 convolve = False, num_hidden_layers = 4, hidden_dropout_prob = .1,
+                 initializer_range = .02, label_smoothing = 0):
+        super().__init__(
+            hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
+            max_position_embeddings = max_position_embeddings, groups = groups, kernel_size = kernel_size,
+            convolve = convolve, num_hidden_layers = num_hidden_layers, hidden_dropout_prob = hidden_dropout_prob,
+            initializer_range = initializer_range, label_smoothing = label_smoothing
+        )
 
 
 
