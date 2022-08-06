@@ -45,7 +45,7 @@ def train_model(dataset, model, training_args, subset=None):
 
 def format_num_param(model):
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return f'{(pytorch_total_params / 1e6):2.1f}M'
+    return f'{(total_params / 1e6):2.1f}M'
 
 
 
