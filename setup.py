@@ -1,16 +1,21 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 setup(
-    name='FastformerLM',
-    version='0.1.0',
+    name='fastformerLM',
+    version='0.1.1',
+    license='CC0 1.0 Universal',
     author='Michael Hu',
     author_email='prmhu@yahoo.com',
     url='https://github.com/mtanghu/Additive-Attention-Is-Not-All-You-Need-Maybe',
     description=(
-        'Fastformer/Additive Attention for causal language modeling'
+        'Fastformer, a Linear Transformer using Additive Attention for causal language modeling'
     ),
-    py_modules=['fastformer'],
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
+    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description_content_type="text/markdown",
+    keywords='linear transformer NLP deep learning pytorch',
     install_requires=[
         'torch>=1.0.0',
         'transformers[torch]',
