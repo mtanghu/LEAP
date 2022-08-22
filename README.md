@@ -1,3 +1,5 @@
+My Drive
+
 # Additive Attention Is All You Need?
 This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)). Also as per the original paper, the models considered in this repo do run faster than a standard Transformer (like GPT2) with the same layer #s and layer sizes (which is not the case with other forms of sparse linear attention).
 
@@ -19,7 +21,7 @@ config = FastformerLMConfig(
     hidden_size = 256, # size of embeddings
     vocab_size = 32100, # number of tokens, if you have a tokenizer use len(tokenizer) instead
     n_positions = 2048, # max number of tokens to process at once
-    n_heads = 4 # number of heads to use in multi-head attention
+    n_heads = 4, # number of heads to use in multi-head attention
     convolve = True, # whether to employ a convolutional layer (note: will increase parameter count)
     groups = 1, # number of groups in convolution layer (ignored if convolve = False) 
     kernel_size = 4, # kernel size for convolution layer (ignored if convolve = False) 
