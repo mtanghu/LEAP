@@ -4,8 +4,6 @@ import torch.nn.functional as F
 from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 
-import math
-
 
 
 class FastSelfAttention(nn.Module):
@@ -37,7 +35,7 @@ class FastSelfAttention(nn.Module):
         keys = self.Wkeys(hidden_states)
         values = self.Wvalues(hidden_states)
         
-        attention_mask = attention_mask.to(dtype=next(self.parameters()).dtype)  # fp16 compatibility
+        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
         attention_mask = (1.0 - attention_mask) * -10000.0
         attention_mask = attention_mask.unsqueeze(2)
         
@@ -112,7 +110,7 @@ class CausalConvolution(nn.Module):
         mod = mod.permute(0, 2, 1)
         
         # padding to ensure causality
-        mod = F.pad(mod, pad=(self.kernel_size-1, 0), mode='constant', value=0)
+        mod = F.pad(mod, pad=(self.kernel_size-1, 0), mode = 'constant', value = 0)
         mod = self.convolutional_layer(mod)
         
         # unpermute

@@ -1,5 +1,7 @@
+My Drive
+
 # Additive Attention Is All You Need?
-This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)). Also as per the original paper, the models considered in this repo do run faster than a standard Transformer (like GPT2) with the same layer #s and layer sizes (which is not the case with other forms of sparse linear attention).
+This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)). Also as per the original paper, the models considered in this repo do run faster than a standard Transformer when run with the same # of layers and layer sizes (which is not the case with other forms of sparse linear attention).
 
 This README will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process/math as well as preliminary results which show that Additive Attention is potentially comparable to full attention (though only on small scales so far), and there is room for development!
 
@@ -19,7 +21,7 @@ config = FastformerLMConfig(
     hidden_size = 256, # size of embeddings
     vocab_size = 32100, # number of tokens, if you have a tokenizer use len(tokenizer) instead
     n_positions = 2048, # max number of tokens to process at once
-    n_heads = 4 # number of heads to use in multi-head attention
+    n_heads = 4, # number of heads to use in multi-head attention
     convolve = True, # whether to employ a convolutional layer (note: will increase parameter count)
     groups = 1, # number of groups in convolution layer (ignored if convolve = False) 
     kernel_size = 4, # kernel size for convolution layer (ignored if convolve = False) 
@@ -50,6 +52,7 @@ A number possibilities for development and usage come to mind:
 3. To help with scalability, maybe [local attention](https://github.com/lucidrains/local-attention) could be used instead of convolution. (note a kind of local Additive Attention was tried informally, but it didn't seem to work well)
 4. Additive Attention only has global attention (and this project also implements local attention with convolution) and thus may be an interesting model to play around with for exploring attentional mechanisms.
 5. Visual Transformers may only need the kind of "global attention" that made Additive Attention SOTA for classification in the original paper. Thus for causal image generation, this project may work.
+6. If this can be scaled up with good performance, because of the RNN formulation, it would be possible to have a large language model run on an edge device.
 
 
 ## Brief Explanation of Additive Attention
