@@ -1,5 +1,3 @@
-My Drive
-
 # Additive Attention Is All You Need?
 [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for (heavily) adapted for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling or don't work that well (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)), and we implement a novel linear in time local attention mechanism not seen in previous linear Attention mechanisms. Also as per the original paper, the models considered in this repo do run faster than a standard Transformer when run with the same # of layers and layer sizes (which is not the case with other forms of sparse linear attention).
 
@@ -50,16 +48,16 @@ A number possibilities for development and usage come to mind:
 2. **More ablation and features** studies could be performed to improve performance. Currently this repo is meant to be a direct comparison (as one-to-one as possible) with GPT2, so more recent transformer advancements have not been implemented (Rotary or ALiBi embeddings, key-query embeddings, parameter sharing, token mixing, new initialization schemes, etc.)
 3. **Visual Transformers** may only need the kind of "global attention" that made Additive Attention SOTA for classification in the original paper, supplementing with local attention would only be a positive. Thus for causal image generation, this project may work well.
 4. **Explainability** A note which was unexplored in the original fastformer paper (because they didn't quite use the same formulation as this repo) is how this system has *built-in explainability*, instead of pairwise interactions with full attention, each token is directly assigned an "importance" scalar (see equations 1 and 2, $\alpha_{i}$ is the importance weight) which can directly be tracked for explaining what tokens were deemed as important for future predictions and what tokens weren't. 
-6. ***Best possibility:*** If this can be scaled up with good performance, because of the RNN formulation, it would be possible to have a large language model run on an edge device because you would only need $O(1)$ time and memory to generate the next token at inference with respect to sequence length.
+6. ***Best possibility:*** If this can be scaled up with good performance, because of the RNN formulation, it would be possible to have a large language model run on an edge device because you would only need O(1) time and memory to generate the next token at inference with respect to sequence length.
 
 
 ## Brief Explanation of Additive Attention
 
-The general concept of Additive Attention is that is instead of allowing each embedded token to attend to every other embedded token (which is $O(N^2)$ complexity where $N$ is the sequence length), Additive Attention* relies on “global attention vectors” which condense information about the entire sequence into a single vector through addition/summation (giving the name “Additive Attention”*). A global attention vector then confers information about the entire sequence to individual embeddings through pointwise multiplying the global attention vector with each embedding vector. The specifics of this last step and other structural details are best explained [in the original paper]([https://arxiv.org/pdf/2108.09084.pdf](https://arxiv.org/pdf/2108.09084.pdf)). We will however dive deeper into the Additive Attention mechanism itself as we will need to adapt it for causal language modeling rather than classification (as was the purpose of the original paper)
+The general concept of Additive Attention is that is instead of allowing each embedded token to attend to every other embedded token (which is O(N^2) complexity where N is the sequence length), Additive Attention* relies on “global attention vectors” which condense information about the entire sequence into a single vector through addition/summation (giving the name “Additive Attention”*). A global attention vector then confers information about the entire sequence to individual embeddings through pointwise multiplying the global attention vector with each embedding vector. The specifics of this last step and other structural details are best explained [in the original paper]([https://arxiv.org/pdf/2108.09084.pdf](https://arxiv.org/pdf/2108.09084.pdf)). We will however dive deeper into the Additive Attention mechanism itself as we will need to adapt it for causal language modeling rather than classification (as was the purpose of the original paper)
 
 Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
 
-Consider a sequence of (possibly transformed) embeddings $\boldsymbol{x_{i}}$ with $i$ from 1 to N…
+Consider a sequence of (possibly transformed) embeddings $\boldsymbol{x_{i}}$ with *i* from 1 to N…
 
 1.  Get an “attention weight” $\alpha_{i}$ (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
 
@@ -73,7 +71,7 @@ $$
 	(2)\ \boldsymbol{g} = \sum_{i=1}^{N} \alpha_{i} \boldsymbol{x_i}
 $$
 
-Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $N$.
+Which is clearly O(N) or linear in time complexity w.r.t the sequence length N.
   
 \* Not to be confused with [Additive Attention by Bahdanau et al. 2014](https://arxiv.org/abs/1409.0473v7)
 
@@ -88,20 +86,20 @@ $$
 $$
 
 
-Now let us instead create $\boldsymbol{g_{i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
+Now let us instead create $\boldsymbol{g_{i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token i. This gives us:
 
 $$
 	(4)\ \boldsymbol{g_i} = \sum\limits_{\ell=1}^{i}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}*\boldsymbol{x_\ell}
 $$
 
 
-Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent** of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
+Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes O(N) time, so recalculating it for every token *i* as equation (4) might suggest would yield a O(N^2) time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent** of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
 	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
 $$
 
-Where the summation terms in the numerator and denominator for each $i$ can be calculated simply by cumulative sum. To elaborate on this and the linear complexity, we can write this as a kind of RNN as Katharpoulos et al. (2020) did.
+Where the summation terms in the numerator and denominator for each *i* can be calculated simply by cumulative sum. To elaborate on this and the linear complexity, we can write this as a kind of RNN as Katharpoulos et al. (2020) did.
 
 $$
 	(6)\ \boldsymbol{s_i} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) *\boldsymbol{x_i}
@@ -119,19 +117,19 @@ $$
 
 ## Local Additive Attention (or Windowed Attention)
 
-While it may make sense to "generate a global attention vector for each token in a sequence", this runs into trouble when potentially more local information is needed (like part-of-speech, subject in a sentence, modifiers for nouns, correct conjugation for verbs, preposition agreement with nouns, etc.). To remedy this we can simply apply the Additive Attention mechanism to a limited backward context. The principle for this is exactly the same as local scaled-dot product Attention where you can find [a diagram and code from lucidrains](https://github.com/lucidrains/local-attention) this is also explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf). Unfortunately though, local attention will cost $O(N*k)$ where $k$ is the size of the backwards context (or in other words, the number of previous tokens to consider--or attend to--for each token), and it can be unclear whether this really improves over $O(N^2)$ (with full scaled dot product attention) when taking into consideration that certainly longer sequences (i.e. bigger $N$) will require larger $k$ to get the good performance (this is discussed in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) as a natural tradeoff). This would even apply to our linear Additive Attention method *if implemented naively*, again we can use some mathematical trickery (like in the previous section) to achieve $O(N)$ *independent of k* (!!!) something that Katharpoulos et al. (2020) had not considered.
+While it may make sense to "generate a global attention vector for each token in a sequence", this runs into trouble when potentially more local information is needed (like part-of-speech, subject in a sentence, modifiers for nouns, correct conjugation for verbs, preposition agreement with nouns, etc.). To remedy this we can simply apply the Additive Attention mechanism to a limited backward context. The principle for this is exactly the same as local scaled-dot product Attention where you can find [a diagram and code from lucidrains](https://github.com/lucidrains/local-attention) this is also explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf). Unfortunately though, local attention will cost O(N*k) where k is the size of the backwards context (or in other words, the number of previous tokens to consider--or attend to--for each token), and it can be unclear whether this really improves over O(N^2) (with full scaled dot product attention) when taking into consideration that certainly longer sequences (i.e. bigger N) will require larger k to get the good performance (this is discussed in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) as a natural tradeoff). This would even apply to our linear Additive Attention method *if implemented naively*, again we can use some mathematical trickery (like in the previous section) to achieve O(N) *independent of k* (!!!) something that Katharpoulos et al. (2020) had not considered.
 
-First let us reconsider equation 5 (which is the Additive Attention equation) for a local/windowed version which only considers the previous $k$ tokens (including itself)
+First let us reconsider equation 5 (which is the Additive Attention equation) for a local/windowed version which only considers the previous k tokens (including itself)
 
 $$
 	(9)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=max(i-k-1,\ 0)}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=max(i-k-1,\ 0)}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
 $$
 
-Note that we need to use a $max$ in case the backwards context or "window" is non-existent or paritally non-existent for $i < k$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
+Note that we need to use a *max* in case the backwards context or "window" is non-existent or paritally non-existent for $i < k$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
 
 
 $$
-	(10)\ 
+	(10)\ \ 
 \boldsymbol{g_i} =  {\sum\limits_{\ell=0}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} - \sum\limits_{\ell=0}^{max(i-k,\ -1)}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell}
 		\over
 \sum\limits_{\ell=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) -\sum\limits_{\ell=0}^{max(i-k, -1)} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
@@ -140,26 +138,26 @@ $$
 Where again, we can easily keep track of all 4 summation terms using cumulative sums. To show this in a different way, we can rewrite this as an RNN again to also emphasize the linearity.
 
 $$
-	(11)\ \boldsymbol{s_i} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) *\boldsymbol{x_i}
+	(11)\ \boldsymbol{s_{i}} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) *\boldsymbol{x_{i}}
 $$
 
 $$
 	(12)\ 
 	\begin{cases}
-		\boldsymbol{s'_{i}} = \boldsymbol{s_{i-k}}, & \text{if }\ i \geq k\\
-		\boldsymbol{s'_{i}} = 0, & \text{if  }\ i < k
+		\boldsymbol{{s'}_{i}} = \boldsymbol{{s}_{i-k}}, & \text{if }\ i \geq k\\
+		\boldsymbol{{s'}_{i}} = 0, & \text{if  }\ i < k
 	\end{cases}
 $$
 
 $$
-	(13)\ z_i = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) 
+	(13)\ {z}_{i} = {z}_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{{x}_{i}} / \sqrt{{d}_{model}}) 
 $$
 
 $$
 	(14)\ 
 	\begin{cases}
-		z'_i = z_{i-k}, & \text{if  }\ i \geq k\\
-		z'_i = 0, & \text{if  }\ i < k\\
+		{z'}_{i} = {z}_{i-k}, & \text{if  }\ i \geq k\\
+		{z'}_{i} = 0, & \text{if  }\ i < k\\
 	\end{cases}
 $$
 
@@ -173,9 +171,9 @@ Note that this should be doable with [Transformers are RNNs](https://arxiv.org/p
 
 It may be confusing that there are two sets of equations for Additive Attention in both of the previous sections, however there is an important purpose.
 
- **During training** when the entire sequence is presented, the key point of Transformers is that even though they have $O(N^2)$ complexity, the complexity comes from a matrix multiplications which are highly parallelizable on GPUs (and TPUs too of course). Lucky for us, a cumulative sum is also parallelizable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html#a16d7bc049ba8985dd89b10b3bcf0a8a3) which is directly called by Pytorch (used in this repo) for cumulative sums (shown by [these CUDA profiles](https://github.com/pytorch/pytorch/issues/75240)). Thus the summation equations (5 and 10) make more sense as they can be directly translated to cumulative sums.
+ **During training** when the entire sequence is presented, the key point of Transformers is that even though they have O(N^2) complexity, the complexity comes from a matrix multiplications which are highly parallelizable on GPUs (and TPUs too of course). Lucky for us, a cumulative sum is also parallelizable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html#a16d7bc049ba8985dd89b10b3bcf0a8a3) which is directly called by Pytorch (used in this repo) for cumulative sums (shown by [these CUDA profiles](https://github.com/pytorch/pytorch/issues/75240)). Thus the summation equations (5 and 10) make more sense as they can be directly translated to cumulative sums.
 
-**During inference** each token is generated one at a time. Thus, at inference we can just focus on the linear (and non-parallel) RNN formulation which just requires us to keep track of the most recent $\boldsymbol{s_i}, \boldsymbol{s'_i}, z_i, z'_i$ (only 2 vectors and 2 scalars) to generate the next token as well as generate the next Additive Attention vectors (i.e. $\boldsymbol{s_{i+i}}, \boldsymbol{s'_{i+1}}, z_{i+1}, z'_{i+1}$). This only needs $O(1)$ complexity in terms of sequence length to generate new tokens, though the dimensionality of the model needs to be considered giving $O(d)$ complexity where $d$ is the width/hidden_size of the model.
+**During inference** each token is generated one at a time. Thus, at inference we can just focus on the linear (and non-parallel) RNN formulation which just requires us to keep track of the most recent $\boldsymbol{s_i}, \boldsymbol{s'_i}, z_i, z'_i$ (only 2 vectors and 2 scalars) to generate the next token as well as generate the next Additive Attention vectors. This only needs O(1) complexity in terms of sequence length to generate new tokens, though the dimensionality of the model needs to be considered giving O(d) complexity where d is the width/hidden_size of the model.
 
 ## Model Structure
 Because this is a causal language model the code is structured like one and implements the following:
