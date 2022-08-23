@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='fastformerLM',
-    version='0.2.1',
+    version='0.2.2',
     license='CC0 1.0 Universal',
     author='Michael Hu',
     author_email='prmhu@yahoo.com',

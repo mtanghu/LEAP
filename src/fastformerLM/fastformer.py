@@ -95,6 +95,8 @@ class FastSelfAttention(nn.Module):
         
         # concat everything back together
         g = g.reshape(batch_size, seq_len, hidden_size)
+        
+        return g
 
 
     def __window_align(self, x):
@@ -188,8 +190,7 @@ class FastformerLMConfig(PretrainedConfig):
     model_type = "FastformerForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, hidden_dropout_prob = .1,
-                 initializer_range = .02, label_smoothing = 0):
+                 n_layer = 4, hidden_dropout_prob = .1, initializer_range = .02):
         
         assert not (use_local_att is False and window_sizes is not None), \
             "window sizes set when not using local attention"
@@ -210,7 +211,7 @@ class FastformerLMConfig(PretrainedConfig):
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
             n_layer = n_layer, hidden_dropout_prob = hidden_dropout_prob,
-            initializer_range = initializer_range, label_smoothing = label_smoothing
+            initializer_range = initializer_range
         )
 
 
@@ -224,8 +225,7 @@ class FastformerForCausalLM(PreTrainedModel):
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.fastformer_model = FastformerDecoder(config)
-        self.criterion = nn.CrossEntropyLoss(label_smoothing = config.label_smoothing)
-        self.eval_criterion = nn.CrossEntropyLoss(label_smoothing = 0)
+        self.criterion = nn.CrossEntropyLoss()
         
         # weight tying
         self.proj_logits.weight = self.word_embedding.weight
@@ -247,10 +247,8 @@ class FastformerForCausalLM(PreTrainedModel):
             # https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            if self.training:
-                loss = self.criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            else:
-                loss = self.eval_criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            
+            loss = self.criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         return CausalLMOutput(loss = loss, logits = logits)
 
