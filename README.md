@@ -57,7 +57,7 @@ The general concept of Additive Attention is that is instead of allowing each em
 
 Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
 
-Consider a sequence of (possibly transformed) embeddings $\boldsymbol{x_{i}}$ with *i* from 1 to N…
+Consider a sequence of (possibly transformed) embeddings ${\boldsymbol{x_{i}}}$ with *i* from 1 to N…
 
 1.  Get an “attention weight” $\alpha_{i}$ (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
 
@@ -65,7 +65,7 @@ $$
 	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_{j}} / \sqrt{d_{model}})}
 $$
 
-2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” $\boldsymbol{g}$ that contains information about the entire sequence, i.e.
+2.  Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0), and sum over the sequence dimension to get a “global attention vector” ${\boldsymbol{g}}$ that contains information about the entire sequence, i.e.
 
 $$ 
 	(2)\ \boldsymbol{g} = \sum_{i=1}^{N} \alpha_{i} \boldsymbol{x_i}
@@ -125,7 +125,7 @@ $$
 	(9)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=max(i-k-1,\ 0)}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=max(i-k-1,\ 0)}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
 $$
 
-Note that we need to use a *max* in case the backwards context or "window" is non-existent or paritally non-existent for $i < k$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
+Note that we need to use a *max* in case the backwards context or "window" is non-existent or paritally non-existent for ${i < k}$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
 
 
 $$
