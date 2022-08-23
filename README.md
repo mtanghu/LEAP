@@ -55,7 +55,7 @@ A number possibilities for development and usage come to mind:
 
 The general concept of Additive Attention is that is instead of allowing each embedded token to attend to every other embedded token (which is O(N^2) complexity where N is the sequence length), Additive Attention relies on “global attention vectors” which condense information about the entire sequence into a single vector through addition/summation (giving the name “Additive Attention”*). A global attention vector then confers information about the entire sequence to individual embeddings through pointwise multiplying the global attention vector with each embedding vector. The specifics of this last step and other structural details are best explained [in the original paper]([https://arxiv.org/pdf/2108.09084.pdf](https://arxiv.org/pdf/2108.09084.pdf)). We will however dive deeper into the Additive Attention mechanism itself as we will need to adapt it for causal language modeling rather than classification (as was the purpose of the original paper).
 
-Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf)) is primarily just the following equations:
+Paraphrasing to some degree, the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf) is primarily just the following equations:
 
 - Consider a sequence of (possibly transformed) embeddings $\boldsymbol{x_{i}}$ with *i* from 1 to N…
 
