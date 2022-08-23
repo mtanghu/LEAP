@@ -144,25 +144,25 @@ $$
 $$
 	(12)\ 
 	\begin{cases}
-		\boldsymbol{{s'}_{i}} = \boldsymbol{{s}_{i-k}}, & \text{if }\ i \geq k\\
-		\boldsymbol{{s'}_{i}} = 0, & \text{if  }\ i < k
+		\boldsymbol{s_{i}'} = \boldsymbol{s_{i-k}}, & \text{if }\ i \geq k\\
+		\boldsymbol{s_{i}'} = 0, & \text{if  }\ i < k
 	\end{cases}
 $$
 
 $$
-	(13)\ {z}_{i} = {z}_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{{x}_{i}} / \sqrt{{d}_{model}}) 
+	(13)\ z_{i} = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) 
 $$
 
 $$
 	(14)\ 
 	\begin{cases}
-		{z'}_{i} = {z}_{i-k}, & \text{if  }\ i \geq k\\
-		{z'}_{i} = 0, & \text{if  }\ i < k\\
+		z_{i}' = z_{i-k}, & \text{if  }\ i \geq k\\
+		z_{i}' = 0, & \text{if  }\ i < k\\
 	\end{cases}
 $$
 
 $$
-	(15)\ \boldsymbol{g_i} = {\boldsymbol{s_i} - \boldsymbol{s'_i} \over z_i -z'_i}
+	(15)\ \boldsymbol{g_i} = {\boldsymbol{s_i} - \boldsymbol{s_i'} \over z_i -z_i'}
 $$
 
 Note that this should be doable with [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) too, though it seems like this is a novel idea that comes from an understanding that Additive Attention is global, and we specifically wanted to have some kind of local attention whereas Katharpoulos et al. (2020) came from a mathematical perspective that kernel-izing the similarity function should roughly approximate softmax similarity scores. Though because both this implementation and theirs rely on cumulative sums which may become overloaded with information after cumulative summing enough token embeddings on long token sequences, we suspect that their system could be improved with linear local attention too! (future work? - I suspect that actually this Additive Attention formulation will outperform theirs because of the nuances *outside* the attention mechanism. Fastformer is able to fit in 2 rounds of Additive Attention that additionally have the advantage of modeling non-linear token interactions using pointwise multiplication).
@@ -173,7 +173,7 @@ It may be confusing that there are two sets of equations for Additive Attention 
 
  **During training** when the entire sequence is presented, the key point of Transformers is that even though they have O(N^2) complexity, the complexity comes from a matrix multiplications which are highly parallelizable on GPUs (and TPUs too of course). Lucky for us, a cumulative sum is also parallelizable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html#a16d7bc049ba8985dd89b10b3bcf0a8a3) which is directly called by Pytorch (used in this repo) for cumulative sums (shown by [these CUDA profiles](https://github.com/pytorch/pytorch/issues/75240)). Thus the summation equations (5 and 10) make more sense as they can be directly translated to cumulative sums.
 
-**During inference** each token is generated one at a time. Thus, at inference we can just focus on the linear (and non-parallel) RNN formulation which just requires us to keep track of the most recent $\boldsymbol{s_i}, \boldsymbol{s'_i}, z_i, z'_i$ (only 2 vectors and 2 scalars) to generate the next token as well as generate the next Additive Attention vectors. This only needs O(1) complexity in terms of sequence length to generate new tokens, though the dimensionality of the model needs to be considered giving O(d) complexity where d is the width/hidden_size of the model.
+**During inference** each token is generated one at a time. Thus, at inference we can just focus on the linear (and non-parallel) RNN formulation which just requires us to keep track of the most recent ${\boldsymbol{s_i}, \boldsymbol{s'_i}, z_i, z'_i}$ (only 2 vectors and 2 scalars) to generate the next token as well as generate the next Additive Attention vectors. This only needs O(1) complexity in terms of sequence length to generate new tokens, though the dimensionality of the model needs to be considered giving O(d) complexity where d is the width/hidden_size of the model.
 
 ## Model Structure
 Because this is a causal language model the code is structured like one and implements the following:
