@@ -7,13 +7,14 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 class FastSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, window_size):
         super().__init__()
         self.config = config
         self.n_heads = config.n_heads
         assert config.hidden_size % self.n_heads == 0, "hidden_size is not divisible by n_heads"
         self.head_size = config.hidden_size // self.n_heads
-        
+        self.window_size = window_size
+
         # only considering single head for now
         self.Wquery = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         self.query_attn = nn.Parameter(torch.zeros(config.hidden_size))
@@ -21,8 +22,7 @@ class FastSelfAttention(nn.Module):
         self.key_attn = nn.Parameter(torch.zeros(config.hidden_size))
         self.Wvalues = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         self.attn_proj = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        
-        self.gelu = nn.GELU()
+
         self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.mid_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -83,59 +83,40 @@ class FastSelfAttention(nn.Module):
         attn = torch.exp(attn)
         attn = attn.unsqueeze(3)
         x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        x = torch.cumsum(attn * x, dim = 1) / torch.cumsum(attn, dim = 1)
+        
+        ## windowed cumsum
+        s = torch.cumsum(attn * x, dim = 1)
+        s = s - self.__window_align(s)
+
+        z = torch.cumsum(attn, dim = 1)
+        z = z - self.__window_align(z)
+        
+        g = s / z
         
         # concat everything back together
-        x = x.reshape(batch_size, seq_len, hidden_size)
-        
-        return x
+        g = g.reshape(batch_size, seq_len, hidden_size)
 
 
-
-class CausalConvolution(nn.Module):
-    def __init__(self, hidden_size, kernel_size, groups, dropout = .1):
-        super().__init__()
-        self.kernel_size = kernel_size
-        self.convolutional_layer = nn.Conv1d(hidden_size, hidden_size, groups = groups,
-                                             kernel_size = kernel_size, padding = 0, bias = False)
-        self.conv_norm = nn.LayerNorm(hidden_size)
-        self.conv_drop = nn.Dropout(dropout)
-
+    def __window_align(self, x):
+        seq_len = x.shape[1]
         
-    def forward(self, hidden_states):
-        # layer norms still makes sense like "A ConvNet for the 2020s"
-        mod = self.conv_norm(hidden_states)
+        # zero out the last window_size vectors, and roll these vectors to the front
+        # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
+        clone_x = torch.clone(x)
+        clone_x[:,-self.window_size:] = 0
+        clone_x = torch.roll(clone_x, self.window_size, 1)
         
-        # batch len, seq len, embedding -> batch len, embedding, seq len (conv1d input format)
-        mod = mod.permute(0, 2, 1)
-        
-        # padding to ensure causality
-        mod = F.pad(mod, pad=(self.kernel_size-1, 0), mode = 'constant', value = 0)
-        mod = self.convolutional_layer(mod)
-        
-        # unpermute
-        mod = mod.permute(0, 2, 1)
-        
-        mod = self.conv_drop(mod)
-        
-        return mod
+        return clone_x
 
 
 
 class FastformerLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, window_size):
         super(FastformerLayer, self).__init__()
-        
-        self.convolve = config.convolve
-        if self.convolve is True:
-            self.convolutional_layer = CausalConvolution(
-                config.hidden_size, config.kernel_size,
-                config.groups, dropout = config.hidden_dropout_prob)
-        
-        self.attention = FastSelfAttention(config)
+        self.attention = FastSelfAttention(config, window_size)
 
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
-        self.gelu = nn.GELU()
+        self.activation = nn.GELU()
         self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size, bias = False)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
@@ -143,10 +124,7 @@ class FastformerLayer(nn.Module):
 
     def forward(self, hidden_states, attention_mask):
         mod = hidden_states
-        
-        if self.convolve is True:
-            mod = mod + self.convolutional_layer(mod)
-        
+
         # residual connection is handled by attention layer
         mod = self.attention(mod, attention_mask)
         
@@ -158,7 +136,7 @@ class FastformerLayer(nn.Module):
     def __boom(self, hidden_states):
         mod = self.boom_norm(hidden_states)
         mod = self.boom(mod)
-        mod = self.gelu(mod)
+        mod = self.activation(mod)
         mod = self.unboom(mod)
         
         # possible parameter saving like SHA-RNN (seems to slow down training significantly)
@@ -174,7 +152,8 @@ class FastformerDecoder(nn.Module):
     def __init__(self, config):
         super(FastformerDecoder, self).__init__()
         self.config = config
-        self.decoders = nn.ModuleList([FastformerLayer(config) for _ in range(config.num_hidden_layers)])
+        self.decoders = nn.ModuleList([FastformerLayer(config, window_size)
+                                       for _, window_size in zip(range(config.n_layer), config.window_sizes)])
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -208,13 +187,29 @@ class FastformerDecoder(nn.Module):
 class FastformerLMConfig(PretrainedConfig):
     model_type = "FastformerForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
-                 n_positions = 1024, groups = 1, kernel_size = 4,
-                 convolve = False, num_hidden_layers = 4, hidden_dropout_prob = .1,
+                 use_local_att = True, window_sizes = None, n_positions = 1024,
+                 n_layer = 4, hidden_dropout_prob = .1,
                  initializer_range = .02, label_smoothing = 0):
+        
+        assert not (use_local_att is False and window_sizes is not None), \
+            "window sizes set when not using local attention"
+
+        if use_local_att is True and window_sizes is not None:
+            assert len(window_sizes) == n_layer, "len(window_sizes) should match # of hidden layers"
+
+        elif use_local_att is True and window_sizes is None:
+            window_sizes = [4 * (2**i) for i in range(n_layer)]
+            
+            # last layer should still be global attention
+            window_sizes[-1] = n_positions
+        else:
+            # don't use windows, i.e. windows are global size
+            window_sizes = [n_positions for _ in range(n_layer)]
+
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
-            n_positions = n_positions, groups = groups, kernel_size = kernel_size,
-            convolve = convolve, num_hidden_layers = num_hidden_layers, hidden_dropout_prob = hidden_dropout_prob,
+            use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
+            n_layer = n_layer, hidden_dropout_prob = hidden_dropout_prob,
             initializer_range = initializer_range, label_smoothing = label_smoothing
         )
 
@@ -226,7 +221,7 @@ class FastformerForCausalLM(PreTrainedModel):
     def __init__(self,config):
         super().__init__(config)
         self.config = config
-        self.word_embedding = nn.Embedding(config.vocab_size,config.hidden_size, padding_idx = 0)
+        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.fastformer_model = FastformerDecoder(config)
         self.criterion = nn.CrossEntropyLoss(label_smoothing = config.label_smoothing)
@@ -248,7 +243,8 @@ class FastformerForCausalLM(PreTrainedModel):
         
         loss = None
         if labels is not None:
-            # shift logits the same gpt2 does at https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
+            # shift logits the same gpt2 does at
+            # https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             if self.training:
@@ -260,13 +256,15 @@ class FastformerForCausalLM(PreTrainedModel):
 
 
     def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding, nn.Conv1d)):
+        # same initialization as gpt2
+        # https://huggingface.co/transformers/v1.1.0/_modules/pytorch_transformers/modeling_gpt2.html
+        if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean = 0.0, std = self.config.initializer_range)
-            if isinstance(module, (nn.Embedding)) and module.padding_idx is not None:
-                with torch.no_grad():
-                    module.weight[module.padding_idx].fill_(0)
-        if isinstance(module, nn.Linear) and module.bias is not None:
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
 
 
 

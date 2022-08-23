@@ -1,9 +1,7 @@
-My Drive
-
 # Additive Attention Is All You Need?
-This curiosity project adapts [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)). Also as per the original paper, the models considered in this repo do run faster than a standard Transformer when run with the same # of layers and layer sizes (which is not the case with other forms of sparse linear attention).
+[Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) for (heavily) adapted for causal language modeling. Code loosely adapted from the [original authors' fastformer code](https://github.com/wuch15/Fastformer) though virtually all parts of the code have been rewritten. Note that this project is somewhat unique as most Linear Attention mechanisms cannot be used for parallel decoder language modeling or don't work that well (see Eleuther comments on ["Have you considered more efficient architectures or methods?](https://www.eleuther.ai/faq/)), and we implement a novel linear in time local attention mechanism not seen in previous linear Attention mechanisms. Also as per the original paper, the models considered in this repo do run faster than a standard Transformer when run with the same # of layers and layer sizes (which is not the case with other forms of sparse linear attention).
 
-This README will summarize Additive Attention and annotate a number of its details, then show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process/math as well as preliminary results which show that Additive Attention is potentially comparable to full attention (though only on small scales so far), and there is room for development!
+This README will summarize Additive Attention and annotate a number of its details, show an unique connection to [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) in the linearization process/math, describe how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention is potentially comparable to full attention, and there is room for development!
 
 ## Usage & Development
 
@@ -18,14 +16,13 @@ Then to use in python (setting the config how you want):
 from fastformer import FastformerForCausalLM, FastformerLMConfig
 
 config = FastformerLMConfig(
-    hidden_size = 256, # size of embeddings
+    hidden_size = 128, # size of embeddings
     vocab_size = 32100, # number of tokens, if you have a tokenizer use len(tokenizer) instead
     n_positions = 2048, # max number of tokens to process at once
+    n_layer = 6, # how many stacked decoder layers to use
+    use_local_att = True, # whether to use windowed/local Additive Attention
+    window_sizes = None, # window sizes to use for windowed/local Additive Attention for each layer (set automatically if None)
     n_heads = 4, # number of heads to use in multi-head attention
-    convolve = True, # whether to employ a convolutional layer (note: will increase parameter count)
-    groups = 1, # number of groups in convolution layer (ignored if convolve = False) 
-    kernel_size = 4, # kernel size for convolution layer (ignored if convolve = False) 
-    num_hidden_layers = 4, # how many stacked decoder layers to use
     label_smoothing = 0, # amount of label smoothing to use
     initializer_range = .02, # standard deviation for weight initialization
     hidden_dropout_prob = .1 # dropout value used for embeddings, attention, and feedforward layers
@@ -42,17 +39,16 @@ trainer = Trainer(
 
 trainer.train()
 ```
-A more complete toy training example with a dataset, tokenization, and evaluations can be found at ``FastLM.ipynb`` in this repository.
+A more complete toy training example with a dataset, tokenization, and evaluations can be found at ``FastLM.ipynb`` in this repository which can be run with only 6GB of VRAM (i.e. GPU memory).
 
 ### Development
 A number possibilities for development and usage come to mind:
 
-1. Additive Attention may work better on other & more specific NLP tasks (Question Answering, Summarization, etc.) as per the [No Free Lunch Theorem](https://en.wikipedia.org/wiki/No_free_lunch_theorem) which especially applies to unique datasets. Other Linear Attention papers seem to use unique datasets.
-2. More ablation and feature adding studies could be performed to improve performance.
-3. To help with scalability, maybe [local attention](https://github.com/lucidrains/local-attention) could be used instead of convolution. (note a kind of local Additive Attention was tried informally, but it didn't seem to work well)
-4. Additive Attention only has global attention (and this project also implements local attention with convolution) and thus may be an interesting model to play around with for exploring attentional mechanisms.
-5. Visual Transformers may only need the kind of "global attention" that made Additive Attention SOTA for classification in the original paper. Thus for causal image generation, this project may work.
-6. If this can be scaled up with good performance, because of the RNN formulation, it would be possible to have a large language model run on an edge device.
+1. Additive Attention may work better on other & more specific NLP tasks (Conversation, Reasoning, genomics, speech/audio, or other specific language domains) as per the [No Free Lunch Theorem](https://en.wikipedia.org/wiki/No_free_lunch_theorem) which especially applies to unique datasets. Other Linear Attention papers seem to use unique datasets too.
+2. **More ablation and features** studies could be performed to improve performance. Currently this repo is meant to be a direct comparison (as one-to-one as possible) with GPT2, so more recent transformer advancements have not been implemented (Rotary or ALiBi embeddings, key-query embeddings, parameter sharing, token mixing, new initialization schemes, etc.)
+3. **Visual Transformers** may only need the kind of "global attention" that made Additive Attention SOTA for classification in the original paper, supplementing with local attention would only be a positive. Thus for causal image generation, this project may work well.
+4. **Explainability** A note which was unexplored in the original fastformer paper (because they didn't quite use the same formulation as this repo) is how this system has *built-in explainability*, instead of pairwise interactions with full attention, each token is directly assigned an "importance" scalar (see equations 1 and 2, $\alpha_i$ is the importance weight) which can directly be tracked for explaining what tokens were deemed as important for future predictions and what tokens weren't. 
+6. ***Best possibility:*** If this can be scaled up with good performance, because of the RNN formulation, it would be possible to have a large language model run on an edge device because you would only need O(1) time and memory to generate the next token at inference with respect to sequence length.
 
 
 ## Brief Explanation of Additive Attention
@@ -109,7 +105,7 @@ Though we may have a time complexity issue. The original Additive Attention mech
 
 $$
 \begin{align}
-	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
+	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
 \end{align}
 $$
 
@@ -133,7 +129,81 @@ $$
 \end{align}
 $$
 
-**Note that Katharpoulos et al. didn't quite have the same process, they instead had to use a kernel to approximate the similarity scores of the keys and queries (and the associativity property) and likewise didn't and couldn't use a softmax. This Additive Attention math still uses a softmax, but the similarity between the two approaches/styles is how they both come from rewriting the equations and using some simplification techniques to achieve linear in complexity attention that can be represented as an RNN/cumulative sum.
+**Note that Katharpoulos et al. didn't quite have the same process, they instead had to use a kernel to approximate the similarity scores of the keys and queries (and the associativity property) and likewise didn't and couldn't use a softmax. This Additive Attention math still uses a softmax, but the similarity between the two approaches/styles is how they both come from rewriting the equations and using some simplification techniques to achieve linear in complexity attention that can be represented as an RNN/cumulative sum with a vector that has sequence information in the numerator and a scalar normalization term in the denominator.
+
+## Local Additive Attention (or Windowed Attention)
+
+While it may make sense to "generate a global attention vector for each token in a sequence", this runs into trouble when potentially more local information is needed (like part-of-speech, subject in a sentence, modifiers for nouns, correct conjugation for verbs, preposition agreement with nouns, etc.). To remedy this we can simply apply the Additive Attention mechanism to a limited backward context. The principle for this is exactly the same as local scaled-dot product Attention where you can find [a diagram and code from lucidrains](https://github.com/lucidrains/local-attention) this is also explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf). Unfortunately though, local attention will cost $O(N*k)$ where $k$ is the size of the backwards context (or in other words, the number of previous tokens to consider--or attend to--for each token), and it can be unclear whether this really improves over $O(N^2)$ (with full scaled dot product attention) when taking into consideration that certainly longer sequences (i.e. bigger $N$) will require larger $k$ to get the good performance (this is discussed in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) as a natural tradeoff). This would even apply to our linear Additive Attention method *if implemented naively*, again we can use some mathematical trickery (like in the previous section) to achieve $O(N)$ *independent of k* (!!!) something that Katharpoulos et al. (2020) had not considered.
+
+First let us reconsider equation 5 (which is the Additive Attention equation) for a local/windowed version which only considers the previous $k$ tokens (including itself)
+
+$$
+\begin{align}
+	(9)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=max(i-k-1,\ 0)}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=max(i-k-1,\ 0)}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
+\end{align}
+$$
+
+Note that we need to use a $max$ in case the backwards context or "window" is non-existent or paritally non-existent for $i < k$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
+
+
+$$
+\begin{align}
+	(10)\ 
+\boldsymbol{g_i} =  {\sum\limits_{\ell=0}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} - \sum\limits_{\ell=0}^{max(i-k,\ -1)}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell}
+		\over
+\sum\limits_{\ell=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) -\sum\limits_{\ell=0}^{max(i-k, -1)} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
+\end{align}
+$$
+
+Where again, we can easily keep track of all 4 summation terms using cumulative sums. To show this in a different way, we can rewrite this as an RNN again to also emphasize the linearity.
+
+$$
+\begin{align}
+	(11)\ \boldsymbol{s_i} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) *\boldsymbol{x_i}
+\end{align}
+$$
+
+$$
+\begin{align}
+	(12)\ 
+	\begin{cases}
+		\boldsymbol{s'_i} = \boldsymbol{s_{i-k}}, & \text{if }\ i \geq k\\
+		\boldsymbol{s'_i} = 0, & \text{if  }\ i < k\\
+	\end{cases}
+\end{align}
+$$
+
+$$
+\begin{align}
+	(13)\ z_i = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) 
+\end{align}
+$$
+
+$$
+\begin{align}
+	(14)\ 
+	\begin{cases}
+		z'_i = z_{i-k}, & \text{if  }\ i \geq k\\
+		z'_i = 0, & \text{if  }\ i < k\\
+	\end{cases}
+\end{align}
+$$
+
+$$
+\begin{align}
+	(15)\ \boldsymbol{g_i} = {\boldsymbol{s_i} - \boldsymbol{s'_i} \over z_i -z'_i}
+\end{align}
+$$
+
+Note that this should be doable with [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) too, though it seems like this is a novel idea that comes from an understanding that Additive Attention is global, and we specifically wanted to have some kind of local attention whereas Katharpoulos et al. (2020) came from a mathematical perspective that kernel-izing the similarity function should roughly approximate softmax similarity scores. Though because both this implementation and theirs rely on cumulative sums which may become overloaded with information after cumulative summing enough token embeddings on long token sequences, we suspect that their system could be improved with linear local attention too! (future work? - I suspect that actually this Additive Attention formulation will outperform theirs because of the nuances *outside* the attention mechanism. Fastformer is able to fit in 2 rounds of Additive Attention that additionally have the advantage of modeling non-linear token interactions using pointwise multiplication).
+
+### Linear RNN or Parallel Cumulative Sum?
+
+It may be confusing that there are two sets of equations for Additive Attention in both of the previous sections, however there is an important purpose.
+
+ **During training** when the entire sequence is presented, the key point of Transformers is that even though they have $O(N^2)$ complexity, the complexity comes from a matrix multiplications which are highly parallelizable on GPUs (and TPUs too of course). Lucky for us, a cumulative sum is also parallelizable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html#a16d7bc049ba8985dd89b10b3bcf0a8a3) which is directly called by Pytorch (used in this repo) for cumulative sums (shown by [these CUDA profiles](https://github.com/pytorch/pytorch/issues/75240)). Thus the summation equations (5 and 10) make more sense as they can be directly translated to cumulative sums.
+
+**During inference** each token is generated one at a time. Thus, at inference we can just focus on the linear (and non-parallel) RNN formulation which just requires us to keep track of the most recent $\boldsymbol{s_i}, \boldsymbol{s'_i}, z_i, z'_i$ (only 2 vectors and 2 scalars) to generate the next token as well as generate the next Additive Attention vectors (i.e. $\boldsymbol{s_{i+i}}, \boldsymbol{s'_{i+1}}, z_{i+1}, z'_{i+1}$). This only needs $O(1)$ complexity in terms of sequence length to generate new tokens, though the dimensionality of the model needs to be considered giving $O(d)$ complexity where $d$ is the width/hidden_size of the model.
 
 ## Model Structure
 Because this is a causal language model the code is structured like one and implements the following:
@@ -144,31 +214,28 @@ Because this is a causal language model the code is structured like one and impl
 - Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)) are also used. (Though huggingface seems to oddly apply label smoothing during validation as well so later experiments will forgo label smoothing)
 - Attention masking of pad tokens ([Viswani et al. 2017](https://arxiv.org/abs/1706.03762))
 - Scaling output projection (right before softmax) by $\frac{1}{\sqrt{d_{model}}}$ and no biases on linear layers (except for output projection) like [PALM](https://arxiv.org/pdf/2204.02311.pdf)
-- Due to some training instability, a residual connection and layer norm was placed in the middle of the full additive attention process 
-
-### Causal Convolution
-An attempt was made to try to model local contexts better (since the Additive Attention mechanism only models global sequence information) using a "causal convolutional layer" somewhat inspired by [CNN Is All You Need](https://arxiv.org/abs/1712.09662) by Qimeng Chen & Ren Wu 2017. This section will be brief though as convolution may be replaced with [local attention](https://github.com/lucidrains/local-attention) at some point.
-
-A 1D convolution was added as a layer into the transformer architecture with a residual connection and layernorm/dropout just as the attentional/feed-forward layers have in the [MegatronLM](https://arxiv.org/pdf/1909.08053.pdf) transformer architecture. This layer was placed before the attentional layer. Furthermore, to keep the "causal" property while maintaining parallelism, we pad the sequence dimension with zero vectors at the start of the sequence ($kernel\ size - 1$ of them). The effect is that as the "kernel"/window slides across the sequence each output $i$ will only have information from embedding up $i$-th token embedding.
+- Due to some training instability, a residual connection and layer norm was placed in the middle of the full additive attention process (diagram on the way!)
 
 ## Results
 
-![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/results.png?raw=True)
+![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/preliminary_results.png?raw=True)
 
-Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green) with the model sizes stated in the legend. The "Convolutional Additive Attention" employs the changes described in the mini-section [Causal Convolution](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need#causal-convolution).
+Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (green) with the model sizes stated in the legend trained on Wikitext-2 using a T5 tokenizer with sequence lengths of 2048. The "Windowed Additive Attention" uses local Additive Attention explained in the "Local Additive Attention (or Windowed Attention)" section. 
+
+As we can on this small scale experiment, the Windowed Additive Attention strongly outcompetes the standard Additive Attention and converges faster with less perplexity compared to GPT2. Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Bigger tests are on the way!!
+
+**Speed:** Both Additive Attention training runs took ~24 minutes while GPT2 took ~36 minutes (50% increase in time) which should become more pronounced at context lengths greater than 2048.
 
 ### Training details
 
-All models were trained on a single NVIDIA GeForce RTX 2060 on Wikitext-2 (raw) using a T5 tokenizer with sequence lengths of 1024 and batch size 4.
+All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2. Code can be found in ``FastLM.ipynb``  .
 
-Model details: all models had a model dimension of 256 (feedforward dimension is 4x the model dimension), 4 attention heads, 4 layers (though the convolutional additive attention only has 3 layers to fit the convolutional layer) and dropout probability of .1 on embedding, attention and feedforward layers. The convolutional layer had a kernel size of 4.
+Model details: all models had a model dimension of 128 (feedforward dimension is 4x the model dimension), 4 attention heads, 6 layers and dropout probability of .1 on embedding, attention, and feedforward layers. The window sizes for Windowed Additive Attention were [4, 8, 16, 32, 64, 2028]).
 
-Optimizer: [AdamW](https://arxiv.org/abs/1711.05101) with learning rate of 1e-3 to start and linear annealing, betas=(.9,.999) and weight decay = .01
+Optimizer: [AdamW](https://arxiv.org/abs/1711.05101) with learning rate of 5e-4 to start and linear annealing, betas=(.9,.999) and weight decay = .01. Mixed precision with gradient clipping = 1 (max norm) is also used.
 
-### Soft Lessons
-- I made a few mistakes in adapting Additive Attention to Causal Language Modeling mostly just spurred from ignorance. I can see the value/necessity of going over the math and checking the math (as the Additive Attention for Causal Language Modeling section does) for ensuring accuracy in this kind of Neural Network context.
-- Label smoothing can mess up measuring validation loss and the smoothing is applied when measuring the validation loss
-- Something that I've experienced already but this project reaffirmed strongly: a lot happens in the experimental process, most of it unexpected! Experiments often didn't go the way one might think even though previous results in other papers would suggest certain results. I think it's important to accept this and quickly adjust to a new plan that hopefully is even better than the previous since now more information is known!
+**Tuning** Very little tuning has been done to optimize performance, only learning rates of [1e-4, 5e-4, 1e-3] have been tried (5e-4 is best for both GPT and Additive Attention in preliminary experiments) and a good way to set the window sizes has not been figured out even though they seem to affect performance strongly.
+
 
 ## References
 Wu, C., Wu, F., Qi, T., Huang, Y., & Xie, X. (2021). Fastformer: Additive attention can be all you need. _arXiv preprint arXiv:2108.09084_.
@@ -176,6 +243,8 @@ Wu, C., Wu, F., Qi, T., Huang, Y., & Xie, X. (2021). Fastformer: Additive attent
 Devlin, J., Chang, M. W., Lee, K., & Toutanova, K. (2018). Bert: Pre-training of deep bidirectional transformers for language understanding. _arXiv preprint arXiv:1810.04805_.
 
 Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020, November). Transformers are rnns: Fast autoregressive transformers with linear attention. In _International Conference on Machine Learning_ (pp. 5156-5165). PMLR.
+
+Beltagy, I., Peters, M. E., & Cohan, A. (2020). Longformer: The long-document transformer. _arXiv preprint arXiv:2004.05150_.
 
 Bahdanau, D., Cho, K., & Bengio, Y. (2014). Neural machine translation by jointly learning to align and translate. _arXiv preprint arXiv:1409.0473_.
 
@@ -192,5 +261,7 @@ Radford, A., Narasimhan, K., Salimans, T., & Sutskever, I. (2018). Improving lan
 Press, O., & Wolf, L. (2016). Using the output embedding to improve language models. _arXiv preprint arXiv:1608.05859_.
 
 Chen, Q., & Wu, R. (2017). CNN is all you need. _arXiv preprint arXiv:1712.09662_.
+
+Kaplan, Jared, et al. "Scaling laws for neural language models." _arXiv preprint arXiv:2001.08361_ (2020).
 
 Loshchilov, I., & Hutter, F. (2017). Decoupled weight decay regularization. _arXiv preprint arXiv:1711.05101_.
