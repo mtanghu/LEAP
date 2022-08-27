@@ -6,7 +6,7 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 
-class FastSelfAttention(nn.Module):
+class LeapAttention(nn.Module):
     def __init__(self, config, window_size):
         super().__init__()
         self.config = config
@@ -56,7 +56,7 @@ class FastSelfAttention(nn.Module):
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
-        similarities = self.qk_norm(q * k) # normalize for stability
+        similarities = self.qk_norm(q * k) # normalize for stability (and so the scaling factor is correct)
         similarities = (similarities).sum(dim = -1)
         
         # scaling
@@ -118,11 +118,10 @@ class FastSelfAttention(nn.Module):
 
 
 
-class FastformerLayer(nn.Module):
+class LeapLayer(nn.Module):
     def __init__(self, config, window_size):
-        super(FastformerLayer, self).__init__()
+        super(LeapLayer, self).__init__()
         self.attention = FastSelfAttention(config, window_size)
-        self.attn_norm = None # will be set for last layer
 
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
         self.activation = nn.GELU()
@@ -133,10 +132,6 @@ class FastformerLayer(nn.Module):
 
     def forward(self, mod, attention_mask):        
         mod = mod + self.attention(mod, attention_mask)
-        
-        # last attention layer as per GPT2 (since prenorming is used)
-        if self.attn_norm is not None:
-            mod = self.attn_norm(mod)
         
         mod = mod + self.__boom(mod)
         
@@ -158,16 +153,12 @@ class FastformerLayer(nn.Module):
 
 
 
-class FastformerDecoder(nn.Module):
+class LeapDecoder(nn.Module):
     def __init__(self, config):
-        super(FastformerDecoder, self).__init__()
+        super(LeapDecoder, self).__init__()
         self.config = config
-        self.decoders = nn.ModuleList([FastformerLayer(config, window_size)
+        self.decoders = nn.ModuleList([LeapLayer(config, window_size)
                                        for _, window_size in zip(range(config.n_layer), config.window_sizes)])
-        
-        # put a layer norm on the last attention block like GPT2 since pre-norming is used
-        self.last_norm = nn.LayerNorm(config.hidden_size)
-        self.decoders[-1].attn_norm = self.last_norm
         
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size)
@@ -199,8 +190,8 @@ class FastformerDecoder(nn.Module):
 
 
 # Create configuation compatible with HuggingFace
-class FastformerLMConfig(PretrainedConfig):
-    model_type = "FastformerForCausalLM"
+class LeapConfig(PretrainedConfig):
+    model_type = "LeapForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, hidden_dropout_prob = .1, initializer_range = .02):
@@ -229,15 +220,15 @@ class FastformerLMConfig(PretrainedConfig):
 
 
 
-class FastformerForCausalLM(PreTrainedModel):
-    config_class = FastformerLMConfig
+class LeapForCausalLM(PreTrainedModel):
+    config_class = LeapConfig
     
     def __init__(self,config):
         super().__init__(config)
         self.config = config
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
-        self.fastformer_model = FastformerDecoder(config)
+        self.leap_model = LeapDecoder(config)
         self.criterion = nn.CrossEntropyLoss()
         
         # weight tying
@@ -255,7 +246,7 @@ class FastformerForCausalLM(PreTrainedModel):
         attention_mask = attention_mask.unsqueeze(2)
         
         embds=self.word_embedding(input_ids)
-        layer_outputs = self.fastformer_model(embds, attention_mask)
+        layer_outputs = self.leap_model(embds, attention_mask)
         
         logits = self.proj_logits(layer_outputs) / self.config.hidden_size**.5
         
@@ -285,5 +276,5 @@ class FastformerForCausalLM(PreTrainedModel):
 
 
 # register config with huggingface
-AutoConfig.register("FastformerForCausalLM", FastformerLMConfig)
-AutoModelForCausalLM.register(FastformerLMConfig, FastformerForCausalLM)
+AutoConfig.register("LeapForCausalLM", LeapConfig)
+AutoModelForCausalLM.register(LeapConfig, LeapForCausalLM)
