@@ -174,7 +174,7 @@ Because this is a causal language model the code is structured like one and impl
 
 ## Results
 
-![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/preliminary_results.png?raw=True)
+![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/src/fastformerLM/preliminary_results.png?raw=True)
 
 Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (GPT2 in green) with the model sizes stated in the legend trained on Wikitext-2 using a T5 tokenizer with sequence lengths of 2048. The "Windowed Additive Attention" uses local Additive Attention explained in the "Local Additive Attention (or Windowed Attention)" section.  After loading the model with the lowest validation perplexity, the test set perplexity for Additive Attention was 86.8, for Windowed Additive Attention 54.2, and for GPT2 62.9.
 
