@@ -11,71 +11,77 @@ class FastSelfAttention(nn.Module):
         super().__init__()
         self.config = config
         self.n_heads = config.n_heads
+        self.hidden_size = config.hidden_size
+        
         assert config.hidden_size % self.n_heads == 0, "hidden_size is not divisible by n_heads"
-        self.head_size = config.hidden_size // self.n_heads
+        self.head_size = self.hidden_size // self.n_heads
         self.window_size = window_size
+        
+        self.Wq = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
+        self.Wk = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
+        self.Wv = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
                 
-        self.attn_vec = nn.Parameter(torch.zeros(config.hidden_size))
-        self.attn_proj = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-
-        self.Wq = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.Wk = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.Wv = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-
-        self.attn_norm = nn.LayerNorm(config.hidden_size)
-        self.mid_norm = nn.LayerNorm(config.hidden_size)
+        self.gate = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
+        
+        self.attn_norm = nn.LayerNorm(self.hidden_size)
+        self.qk_norm = nn.LayerNorm(self.head_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, hidden_states, attention_mask):
-        hidden_states = self.attn_norm(hidden_states)
+    def forward(self, mod, attention_mask):
+        mod = self.attn_norm(mod)
         
-        # additive attention
-        pre_attn = self.attn_proj(hidden_states)
-        attended = self.__additive_attn(hidden_states, self.attn_vec, attention_mask)
-        attended = self.attn_dropout(attended)
+        # transformations so each matrix has its own purpose
+        gating = torch.sigmoid(self.gate(mod))
+        queries = self.Wq(mod)
+        keys = self.Wk(mod)
+        values = self.Wv(mod)
         
-        queries = self.Wq(hidden_states)
-        keys = self.Wk(attended)
-        values = self.Wv(attended)
-
-        weighted_values = self.__self_attn(queries, keys, values)
+        # linear attention
+        weighted_values = self.__cumsum_attn(queries, keys, values, attention_mask)
         weighted_values = self.attn_dropout(weighted_values)
+        
+        # gating
+        weighted_values = gating * weighted_values
         
         return weighted_values
 
 
-    def __additive_attn(self, x, learned_vector, attention_mask):
-        '''This function implements equations 3-4 which are the same as equations 5-6'''
+    def __cumsum_attn(self, q, k, v, attention_mask):
+        batch_size, seq_len, hidden_size = q.shape
         
-        batch_size, seq_len, hidden_size = x.shape
-                
-        # manual dot product/down projection (for multihead attention)
-        attn = x * learned_vector
-        attn = attn.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        attn = attn.sum(dim = -1) / self.head_size**.5 # scaling
+        # reshape for multihead formulation
+        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        
+        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
+        similarities = self.qk_norm(q * k) # normalize for stability
+        similarities = (similarities).sum(dim = -1)
+        
+        # scaling
+        similarities = similarities / self.head_size**.5
         
         # masking out pad tokens
-        attn += attention_mask
+        similarities += attention_mask
         
-        # manual softmax and cumulative sum
-        attn = torch.exp(attn)
-        attn = attn.unsqueeze(3)
-        x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        # we will do a manual softmax, so we are manually exponentiating the similarity scores
+        similarities = torch.exp(similarities)
+        similarities = similarities.unsqueeze(3)
         
-        ## windowed cumsum
-        s = torch.cumsum(attn * x, dim = 1)
+        # windowed cumsum 
+        s = torch.cumsum(similarities * v, dim = 1)
         s = s - self.__window_align(s)
-
-        z = torch.cumsum(attn, dim = 1)
+        z = torch.cumsum(similarities, dim = 1)
         z = z - self.__window_align(z)
         
-        g = s / z
+        # finish off manual softmax by dividing by normalization term z
+        weighted_v = s / z
         
         # concat heads
-        g = g.reshape(batch_size, seq_len, hidden_size)
+        weighted_v = weighted_v.reshape(batch_size, seq_len, hidden_size)
         
-        return g
+        return weighted_v
 
 
     def __window_align(self, x):
@@ -116,6 +122,7 @@ class FastformerLayer(nn.Module):
     def __init__(self, config, window_size):
         super(FastformerLayer, self).__init__()
         self.attention = FastSelfAttention(config, window_size)
+        self.attn_norm = None # will be set for last layer
 
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
         self.activation = nn.GELU()
@@ -124,18 +131,20 @@ class FastformerLayer(nn.Module):
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, hidden_states, attention_mask):
-        mod = hidden_states
-
+    def forward(self, mod, attention_mask):        
         mod = mod + self.attention(mod, attention_mask)
+        
+        # last attention layer as per GPT2 (since prenorming is used)
+        if self.attn_norm is not None:
+            mod = self.attn_norm(mod)
         
         mod = mod + self.__boom(mod)
         
         return mod
 
 
-    def __boom(self, hidden_states):
-        mod = self.boom_norm(hidden_states)
+    def __boom(self, mod):
+        mod = self.boom_norm(mod)
         mod = self.boom(mod)
         mod = self.activation(mod)
         mod = self.unboom(mod)
@@ -155,6 +164,11 @@ class FastformerDecoder(nn.Module):
         self.config = config
         self.decoders = nn.ModuleList([FastformerLayer(config, window_size)
                                        for _, window_size in zip(range(config.n_layer), config.window_sizes)])
+        
+        # put a layer norm on the last attention block like GPT2 since pre-norming is used
+        self.last_norm = nn.LayerNorm(config.hidden_size)
+        self.decoders[-1].attn_norm = self.last_norm
+        
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -242,6 +256,7 @@ class FastformerForCausalLM(PreTrainedModel):
         
         embds=self.word_embedding(input_ids)
         layer_outputs = self.fastformer_model(embds, attention_mask)
+        
         logits = self.proj_logits(layer_outputs) / self.config.hidden_size**.5
         
         loss = None
