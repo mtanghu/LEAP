@@ -1,6 +1,6 @@
-# Additive Attention Is All You Need?
+# Linear Explainable Attention in Parallel (LEAP)
 
-This project **heavily** adapts Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for the purposes of causal language modeling. We use a different structure and linearize the global attention mechanism originally described in a way that is parallelizable. Furthermore we use a different multi-head Additive Attention formulation as well add the novel contribution of linear local attention.
+This project implements a novel linear attention mechanism based on cumulative sums that are attention weighted.
 
 Positive aspects of this approach (some novel):
 
@@ -9,37 +9,37 @@ Positive aspects of this approach (some novel):
 3. Already integrated with [HuggingFace🤗 Transformers](https://huggingface.co/)
 4. **Linear in time local attention**, this concept has not been seen before in the literature as local attention typically has to scale in time complexity with the size of the local window, which we use some math trickery to get around this (and still be parallelize-able). This gets around the issue that longer sequences will typically need bigger local attention windows, as well as the issue that local + global attention (previously explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) and [BigBird](https://arxiv.org/pdf/2004.05150.pdf)) may not have enough representational complexity at scale (not enough mid-range sequence modeling)
 5. **Built-in Explainability**, while explainability is not supported yet in this project, as we'll see later, each token will be assigned an "importance weight" (which is softmax-ed) which can be used to explain what tokens the model is paying attention to, and which tokens are ignored similar to the explainability offered by the original [Attention is All you Need](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) paper, though even more explainable as attention weights aren't pairwise anymore
-6. **O(1) Path Length/Flexibility**, A great strength of full attention Transformers is the flexibility provided by the $O(1)$ path length. An example where many linear attention mechanisms would likely fail (ie. if they only use local/convolutional attention or time-decaying factors or a recurrent vector that will get overloaded with information over time) would be when there is "*task metadata*" at the beginning of the sequence. Example: "Read the following story paying special attention to how Alice treats Bob as you will write an essay on this after: \<very long story here\>". This task information may not make it all the way through the story and writing the essay with the previously mentioned approaches, but with this project's approach, tokens from the beginning of the sequence can directly transfer information to tokens at the end of the sequence with a $O(1)$ path length (like full-attention) through global Additive Attention
-7. **O(1) Inference**, the math of Additive Attention can be represented as an RNN (while still maintaining the $O(1)$ path length). Thus, you only need the previous token's embeddings (i.e. $O(1)$ space) to calculate the next token (as per being an RNN) which only takes $O(1)$ computations with no matrix-matrix operations (all with respect to sequence length holding model size/dimension constant). This was originally shown in [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) to increase inference time performance by thousands of times and could potentially *allow large language models to run on edge devices like mobile phones or consumer laptops!*
+6. **O(1) Path Length/Flexibility**, A great strength of full attention Transformers is the flexibility provided by the $O(1)$ path length. An example where many linear attention mechanisms would likely fail (ie. if they only use local/convolutional attention or time-decaying factors or a recurrent vector that will get overloaded with information over time) would be when there is "*task metadata*" at the beginning of the sequence. Example: "Read the following story paying special attention to how Alice treats Bob as you will write an essay on this after: \<very long story here\>". This task information may not make it all the way through the story and writing the essay with the previously mentioned approaches, but with this project's approach, tokens from the beginning of the sequence can directly transfer information to tokens at the end of the sequence with a $O(1)$ path length (like full-attention) through global LEAP
+7. **O(1) Inference**, the math of LEAP can be represented as an RNN (while still maintaining the $O(1)$ path length). Thus, you only need the previous token's embeddings (i.e. $O(1)$ space) to calculate the next token (as per being an RNN) which only takes $O(1)$ computations with no matrix-matrix operations (all with respect to sequence length holding model size/dimension constant). This was originally shown in [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) to increase inference time performance by thousands of times and could potentially *allow large language models to run on edge devices like mobile phones or consumer laptops!*
 
 
-This README will summarize Additive Attention and annotate a number of its details, show a unique linearization process/math (which allows for RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention is potentially comparable to full attention, and there is plenty of room for development!
+This README will summarize LEAP and annotate a number of its details, show a unique linearization process/math (which allows for RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that LEAP is potentially comparable to full attention, and there is plenty of room for development!
 
 ## Usage & Development
 
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/))
 
 ```bash
-pip install fastformerLM
+pip install leap-transformer
 ```
 
 Then to use in python (setting the config how you want):
 ```python
-from fastformer import FastformerForCausalLM, FastformerLMConfig
+from leap import LeapForCausalLM, LeapConfig
 
-config = FastformerLMConfig(
+config = LeapConfig(
     hidden_size = 128, # size of embeddings
     vocab_size = 32100, # number of tokens, if you have a tokenizer use len(tokenizer) instead
     n_positions = 2048, # max number of tokens to process at once
     n_layer = 6, # how many stacked decoder layers to use
-    use_local_att = True, # whether to use windowed/local Additive Attention
-    window_sizes = None, # window sizes to use for windowed/local Additive Attention for each layer (set automatically if None)
+    use_local_att = True, # whether to use windowed/local LEAP
+    window_sizes = None, # window sizes to use for windowed/local LEAP for each layer (set automatically if None)
     n_heads = 4, # number of heads to use in multi-head attention
     initializer_range = .02, # standard deviation for weight initialization
     hidden_dropout_prob = .1 # dropout value used for embeddings, attention, and feedforward layers
 )
 
-model = FastformerForCausalLM(config)
+model = LeapForCausalLM(config)
 
 # this model is compatible with huggingface and its "trainer" interface
 from transformers import Trainer

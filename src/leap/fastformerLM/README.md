@@ -9,12 +9,12 @@ This README will summarize Additive Attention mathematics and annotate a number 
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/))
 
 ```bash
-pip install fastformerLM
+pip install leap-transformer
 ```
 
 Then to use in python (setting the config how you want):
 ```python
-from fastformer import FastformerForCausalLM, FastformerLMConfig
+from leap import FastformerForCausalLM, FastformerLMConfig
 
 config = FastformerLMConfig(
     hidden_size = 128, # size of embeddings
