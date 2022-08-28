@@ -71,7 +71,7 @@ class FastSelfAttention(nn.Module):
         
         batch_size, seq_len, hidden_size = x.shape
                 
-        # manual dot product (for multihead attention)
+        # manual down projection (for multihead attention)
         attn = x * learned_vector
         attn = attn.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         attn = attn.sum(dim = -1) / self.head_size**.5 # scaling

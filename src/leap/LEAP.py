@@ -6,7 +6,7 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 
-class LeapAttention(nn.Module):
+class LeapBlock(nn.Module):
     def __init__(self, config, window_size):
         super().__init__()
         self.config = config
@@ -20,6 +20,7 @@ class LeapAttention(nn.Module):
         self.Wq = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
         self.Wk = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
         self.Wv = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
+        self.vec = nn.Parameter(torch.randn(self.hidden_size) * config.initializer_range)
                 
         self.gate = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
         
@@ -38,26 +39,26 @@ class LeapAttention(nn.Module):
         values = self.Wv(mod)
         
         # linear attention
-        weighted_values = self.__cumsum_attn(queries, keys, values, attention_mask)
+        weighted_values = self.__attn(queries, keys, values, attention_mask)
         weighted_values = self.attn_dropout(weighted_values)
         
         # gating
-        weighted_values = gating * weighted_values
+        #weighted_values = gating * weighted_values
         
         return weighted_values
 
 
-    def __cumsum_attn(self, q, k, v, attention_mask):
+    def __attn(self, q, k, v, attention_mask):
         batch_size, seq_len, hidden_size = q.shape
         
         # reshape for multihead formulation
-        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size) / self.hidden_size**.5
         k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        
+
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
-        similarities = self.qk_norm(q * k) # normalize for stability (and so the scaling factor is correct)
-        similarities = (similarities).sum(dim = -1)
+        similarities = (q).sum(dim = -1)
+        print(similarities.max().item(), similarities.mean().item())
         
         # scaling
         similarities = similarities / self.head_size**.5
@@ -65,7 +66,7 @@ class LeapAttention(nn.Module):
         # masking out pad tokens
         similarities += attention_mask
         
-        # we will do a manual softmax, so we are manually exponentiating the similarity scores
+        # manual cumulative softmax
         similarities = torch.exp(similarities)
         similarities = similarities.unsqueeze(3)
         
@@ -90,38 +91,17 @@ class LeapAttention(nn.Module):
         # zero out the last window_size vectors, and roll these vectors to the front
         # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
         clone_x = torch.clone(x)
-        clone_x[:,-self.window_size:] = 0
-        clone_x = torch.roll(clone_x, self.window_size, 1)
+        clone_x[:,-self.window_size:] *= 0
+        clone_x = torch.roll(clone_x, self.window_size, dims = 1)
         
         return clone_x
-
-
-    def __self_attn(self, q, k, v):
-        batch_size, seq_len, hidden_size = q.shape
-
-        # reshape for multihead formulation
-        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        
-        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
-        similarities = (q * k).sum(dim = -1)
-        
-        # scaling
-        similarities = similarities / self.head_size**.5
-        
-        # weight the values by similarity (so tokens can recieve only desired information)
-        weighted_values = similarities.unsqueeze(3) * v
-        
-        # concat heads
-        return weighted_values.reshape(batch_size, seq_len, hidden_size)
 
 
 
 class LeapLayer(nn.Module):
     def __init__(self, config, window_size):
         super(LeapLayer, self).__init__()
-        self.attention = FastSelfAttention(config, window_size)
+        self.attention = LeapBlock(config, window_size)
 
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
         self.activation = nn.GELU()
