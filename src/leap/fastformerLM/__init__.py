@@ -1,0 +1,1 @@
+from .fastformer import FastformerForCausalLM, FastformerLMConfig
