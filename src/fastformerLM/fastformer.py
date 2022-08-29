@@ -17,23 +17,22 @@ class FastSelfAttention(nn.Module):
 
         # only considering single head for now
         self.Wquery = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.query_attn = nn.Parameter(torch.zeros(config.hidden_size))
+        self.query_attn = nn.Parameter(torch.randn(self.n_heads, self.head_size) * config.initializer_range)
         self.Wkeys = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.key_attn = nn.Parameter(torch.zeros(config.hidden_size))
+        self.key_attn = nn.Parameter(torch.randn(self.n_heads, self.head_size) * config.initializer_range)
         self.Wvalues = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.attn_proj = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
 
         self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.mid_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, hidden_states, attention_mask):
-        hidden_states = self.attn_norm(hidden_states)
+    def forward(self, mod, attention_mask):
+        mod = self.attn_norm(mod)
 
-        query = self.Wquery(hidden_states)
-        keys = self.Wkeys(hidden_states)
-        values = self.Wvalues(hidden_states)
+        query = self.Wquery(mod)
+        keys = self.Wkeys(mod)
+        values = self.Wvalues(mod)
         
         attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
         attention_mask = (1.0 - attention_mask) * -10000.0
@@ -41,40 +40,39 @@ class FastSelfAttention(nn.Module):
         
         # equations (3-4)
         pooled_query = self.__additive_attn(query, self.query_attn, attention_mask)
-        
-        # projection after multihead attention like original transformer
         pooled_query = self.attn_dropout(pooled_query)
-        pooled_query = self.attn_proj(pooled_query)
         
         # corresponds to "p_i = q * k_i" in paper
         mixed_keys = pooled_query * keys
         
-        # residual + norm for extra stability
-        residual = hidden_states + mixed_keys
-        mixed_keys = self.mid_norm(residual)
-        
         # equations (5-6)
         pooled_keys = self.__additive_attn(mixed_keys, self.key_attn, attention_mask)
-        
-        # no projection here to save parameters
         pooled_keys = self.attn_dropout(pooled_keys)
         
         # corresponds to "u_i = k * v_i" in paper
         weighted_values = pooled_keys * values
 
-        # residual connection here since there are 2 rounds of additive attention
-        return residual + weighted_values
+        # residual here because of 2 rounds of Additive Attention
+        return weighted_values
     
     
     def __additive_attn(self, x, learned_vector, attention_mask):
         '''This function implements equations 3-4 which are the same as equations 5-6'''
         
         batch_size, seq_len, hidden_size = x.shape
+        
+        # reshape for multihead attention
+        x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        
+        # norm for stability and so that the strong scaling step works
+        x = self.__real_norm(x)
+        learned_vector = self.__real_norm(learned_vector)
                 
-        # manual dot product (for multihead attention)
-        attn = x * learned_vector
-        attn = attn.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        attn = attn.sum(dim = -1) / self.head_size**.5 # scaling
+        # manual down projection for speed (instead of using einsum)
+        attn = (x * learned_vector).sum(dim = -1)
+        
+         # STRONG scaling so that the max attention score is 5 (because of previous norming)
+        attn = (attn / self.head_size) * 5
         
         # masking out pad tokens
         attn += attention_mask
@@ -87,16 +85,21 @@ class FastSelfAttention(nn.Module):
         ## windowed cumsum
         s = torch.cumsum(attn * x, dim = 1)
         s = s - self.__window_align(s)
-
         z = torch.cumsum(attn, dim = 1)
         z = z - self.__window_align(z)
         
+        # finish softmax by dividing by normalization term z
         g = s / z
         
         # concat everything back together
         g = g.reshape(batch_size, seq_len, hidden_size)
         
         return g
+
+
+    def __real_norm(self, x):
+        # normalize x on the last dimension (the head dimension in this case) with eps term for stability
+        return (x - x.mean(dim = -1).unsqueeze(-1)) / (x.std(dim = -1).unsqueeze(-1) + 1e-5)
 
 
     def __window_align(self, x):
@@ -124,19 +127,17 @@ class FastformerLayer(nn.Module):
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, hidden_states, attention_mask):
-        mod = hidden_states
-
-        # residual connection is handled by attention layer
-        mod = self.attention(mod, attention_mask)
+    def forward(self, mod, attention_mask):
+        # no residual here as it is handled by the the FastSelfAttention
+        mod = mod + self.attention(mod, attention_mask)
         
         mod = mod + self.__boom(mod)
         
         return mod
 
 
-    def __boom(self, hidden_states):
-        mod = self.boom_norm(hidden_states)
+    def __boom(self, mod):
+        mod = self.boom_norm(mod)
         mod = self.boom(mod)
         mod = self.activation(mod)
         mod = self.unboom(mod)
@@ -157,7 +158,7 @@ class FastformerDecoder(nn.Module):
         self.decoders = nn.ModuleList([FastformerLayer(config, window_size)
                                        for _, window_size in zip(range(config.n_layer), config.window_sizes)])
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size)
+        self.embedding_norm = nn.LayerNorm(config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
@@ -173,8 +174,7 @@ class FastformerDecoder(nn.Module):
 
         embeddings = input_embs + position_embeddings
         
-        embeddings = self.LayerNorm(embeddings)
-
+        embeddings = self.embedding_norm(embeddings)
         embeddings = self.dropout(embeddings)
         
         layer_outputs = embeddings
@@ -237,7 +237,7 @@ class FastformerForCausalLM(PreTrainedModel):
         if attention_mask is None:
             attention_mask = torch.ones(input_ids.shape)
         
-        embds=self.word_embedding(input_ids)
+        embds = self.word_embedding(input_ids)
         layer_outputs = self.fastformer_model(embds, attention_mask)
         logits = self.proj_logits(layer_outputs) / self.config.hidden_size**.5
         
