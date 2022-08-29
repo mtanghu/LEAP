@@ -194,15 +194,14 @@ It may be confusing that there are two sets of equations for Additive Attention 
 
 ## Model Structure
 
-Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2:
+Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2 [paper for reference by Radford et al. (2019)](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf):
 
-- Ordering of residual connections, layer norms and dropouts follows [MegatronLM](https://arxiv.org/pdf/1909.08053.pdf) by Shoeybi, Patwary & Puri et al. 2020. (shouldn't affect performance much, just stability)
-- Learned positional embeddings ([Radford et al. 2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf), though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings.
-- Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2.
-- Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)). (Though huggingface seems to oddly apply label smoothing during validation as well so later experiments will forgo label smoothing)
-- Attention masking of pad tokens ([Viswani et al. 2017](https://arxiv.org/abs/1706.03762))
-- <div></div>Scaling output projection (right before softmax) by $1 \over \sqrt{d_{model}}$ and no biases on linear layers (except for output projection) like [PALM](https://arxiv.org/pdf/2204.02311.pdf) (this shouldn't affect performance just stability)
-- Due to some training instability, a residual connection and layer norm was placed in the middle of the full additive attention process (diagram on the way!)
+- Pre-norming with a layernorm before projecting to logits like GPT2
+- Dropout of .1 on embeddings, feedforward layers, and this project applies dropout after each usage of Additive Attention (to mimic attention dropout) just like GPT2
+- Learned positional embeddings ([GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2, though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings
+- Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2
+- Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
+- Attention masking of pad tokens ([Attnetion is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
 
 ## Results
 
