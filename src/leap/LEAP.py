@@ -60,19 +60,19 @@ class LeapBlock(nn.Module):
         attn = (q * k).sum(dim = -1)
         
         # STRONG scaling so that the max attention score is 5
-        similarities = (similarities / self.head_size) * 5
+        attn = (attn / self.head_size) * 5
         
         # masking out pad tokens (after demeaning as demeaning would be messed up)
-        similarities += attention_mask
+        attn += attention_mask
         
         # manual cumulative softmax
-        similarities = torch.exp(similarities)
-        similarities = similarities.unsqueeze(-1)
+        attn = torch.exp(attn)
+        attn = attn.unsqueeze(-1)
         
         # windowed cumsum 
-        s = torch.cumsum(similarities * v, dim = 1)
+        s = torch.cumsum(attn * v, dim = 1)
         s = s - self.__window_align(s)
-        z = torch.cumsum(similarities, dim = 1)
+        z = torch.cumsum(attn, dim = 1)
         z = z - self.__window_align(z)
         
         # finish off manual softmax by dividing by normalization term z

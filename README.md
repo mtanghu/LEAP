@@ -1,5 +1,7 @@
 # Linear Explainable Attention in Parallel (LEAP)
 
+THIS PROJECT IS CURRENTLY UNDER CONSTRUCTION, PLEASE CHECK BACK IN 3 DAYS!!!
+
 This project implements a novel linear attention mechanism based on cumulative sums that are attention weighted.
 
 Positive aspects of this approach (some novel):
