@@ -162,15 +162,14 @@ Note that this should be doable with [Transformers are RNNs](https://arxiv.org/p
 
 ## Model Structure
 
-Because this is a causal language model the code is structured like one and implements the following to be fair comparison against [GPT2](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf):
+Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2 [paper for reference by Radford et al. (2019)](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf):
 
-- Pre-norming like GPT2. Not that the paper mentions having an extra layernorm on the last self attention block but the [huggingface implementation](https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html) (see the code for Attention and Block) doesn't seem to implement that so we don't either 
-- Learned positional embeddings ([Radford et al. 2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf), though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings
+- Pre-norming with a layernorm before projecting to logits like GPT2
+- Dropout of .1 on embeddings, feedforward layers, and this project applies dropout after each usage of Additive Attention (to mimic attention dropout) just like GPT2
+- Learned positional embeddings ([GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2, though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2
-- Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)). (Though huggingface seems to oddly apply label smoothing during validation as well so later experiments will forgo label smoothing)
-- Attention masking of pad tokens ([Viswani et al. 2017](https://arxiv.org/abs/1706.03762))
-- <div></div>Scaling output projection (right before softmax) by $1 \over \sqrt{d_{model}}$ and no biases on linear layers (except for output projection) like [PALM](https://arxiv.org/pdf/2204.02311.pdf) (this shouldn't affect performance just stability)
-- Due to some training instability, a residual connection and layer norm was placed after the "keys" are pointwise multiplied with the "queries" in the fastformer
+- Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
+- Attention masking of pad tokens ([Attnetion is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
 
 ## Results
 
@@ -184,7 +183,7 @@ As we can see on this small scale experiment, the Windowed Additive Attention st
 
 ### Training details
 
-All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2. Code can be found in ``FastLM.ipynb``   which uses the [HuggingFace 🤗 Transfomers](https://huggingface.co/) specifically the [Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer).
+All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2. Code can be found in ``FastLM.ipynb`` which uses the [HuggingFace 🤗 Transfomers](https://huggingface.co/) specifically the [Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer).
 
 Model details: all models had a model dimension of 128 (feedforward dimension is 4x the model dimension), 4 attention heads, 6 layers and dropout probability of .1 on embedding, attention, and feedforward layers. The window sizes for Local Additive Attention were [4, 8, 16, 32, 64, 2028] as per the heurstic described.
 

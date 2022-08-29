@@ -43,7 +43,7 @@ class LeapBlock(nn.Module):
         weighted_values = self.attn_dropout(weighted_values)
         
         # gating
-        #weighted_values = gating * weighted_values
+        weighted_values = gating * weighted_values
         
         return weighted_values
 
@@ -51,24 +51,23 @@ class LeapBlock(nn.Module):
     def __attn(self, q, k, v, attention_mask):
         batch_size, seq_len, hidden_size = q.shape
         
-        # reshape for multihead formulation
-        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size) / self.hidden_size**.5
-        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        # reshape for multihead formulation, normalize as part of making sure max attn score doesn't explode
+        q = self.__real_norm(q.reshape(batch_size, seq_len, self.n_heads, self.head_size))
+        k = self.__real_norm(k.reshape(batch_size, seq_len, self.n_heads, self.head_size))
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
-        similarities = (q).sum(dim = -1)
-        print(similarities.max().item(), similarities.mean().item())
+        attn = (q * k).sum(dim = -1)
         
-        # scaling
-        similarities = similarities / self.head_size**.5
+        # STRONG scaling so that the max attention score is 5
+        similarities = (similarities / self.head_size) * 5
         
-        # masking out pad tokens
+        # masking out pad tokens (after demeaning as demeaning would be messed up)
         similarities += attention_mask
         
         # manual cumulative softmax
         similarities = torch.exp(similarities)
-        similarities = similarities.unsqueeze(3)
+        similarities = similarities.unsqueeze(-1)
         
         # windowed cumsum 
         s = torch.cumsum(similarities * v, dim = 1)
@@ -83,6 +82,10 @@ class LeapBlock(nn.Module):
         weighted_v = weighted_v.reshape(batch_size, seq_len, hidden_size)
         
         return weighted_v
+
+
+    def __real_norm(self, x):
+        return (x - x.mean(dim = -1).unsqueeze(-1)) / x.std(dim = -1).unsqueeze(-1)
 
 
     def __window_align(self, x):
@@ -141,7 +144,6 @@ class LeapDecoder(nn.Module):
                                        for _, window_size in zip(range(config.n_layer), config.window_sizes)])
         
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
@@ -156,8 +158,6 @@ class LeapDecoder(nn.Module):
         position_embeddings = self.position_embeddings(position_ids)
 
         embeddings = input_embs + position_embeddings
-        
-        embeddings = self.LayerNorm(embeddings)
 
         embeddings = self.dropout(embeddings)
         
@@ -209,6 +209,7 @@ class LeapForCausalLM(PreTrainedModel):
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.leap_model = LeapDecoder(config)
+        self.last_norm = nn.LayerNorm(config.hidden_size)
         self.criterion = nn.CrossEntropyLoss()
         
         # weight tying
@@ -223,12 +224,12 @@ class LeapForCausalLM(PreTrainedModel):
 
         attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
         attention_mask = (1.0 - attention_mask) * -10000.0
-        attention_mask = attention_mask.unsqueeze(2)
+        attention_mask = attention_mask.unsqueeze(-1)
         
         embds=self.word_embedding(input_ids)
         layer_outputs = self.leap_model(embds, attention_mask)
-        
-        logits = self.proj_logits(layer_outputs) / self.config.hidden_size**.5
+        layer_outputs = self.last_norm(layer_outputs)
+        logits = self.proj_logits(layer_outputs)
         
         loss = None
         if labels is not None:
