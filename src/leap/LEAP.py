@@ -6,86 +6,72 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 
-class LeapBlock(nn.Module):
-    def __init__(self, config, window_size):
-        super().__init__()
-        self.config = config
-        self.n_heads = config.n_heads
-        self.hidden_size = config.hidden_size
-        
-        assert config.hidden_size % self.n_heads == 0, "hidden_size is not divisible by n_heads"
-        self.head_size = self.hidden_size // self.n_heads
+class MultiheadLeap(nn.Module):
+    def __init__(self, hidden_size, n_heads, window_size, dropout = .1):
+        super(MultiheadLeap, self).__init__()
+        self.n_heads = n_heads
+        self.hidden_size = hidden_size
+        self.head_size = hidden_size // n_heads
         self.window_size = window_size
-        
-        self.Wq = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
-        self.Wk = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
-        self.Wv = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
-        self.vec = nn.Parameter(torch.randn(self.hidden_size) * config.initializer_range)
-                
-        self.gate = nn.Linear(self.hidden_size, self.hidden_size, bias = False)
-        
-        self.attn_norm = nn.LayerNorm(self.hidden_size)
-        self.qk_norm = nn.LayerNorm(self.head_size)
-        self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        self.drop = nn.Dropout(dropout)
 
 
-    def forward(self, mod, attention_mask):
-        mod = self.attn_norm(mod)
+    def forward(self, q, f1, f2, v, attention_mask = None):        
+        batch_size, seq_len, hidden_size = v.shape
         
-        # transformations so each matrix has its own purpose
-        gating = torch.sigmoid(self.gate(mod))
-        queries = self.Wq(mod)
-        keys = self.Wk(mod)
-        values = self.Wv(mod)
-        
-        # linear attention
-        weighted_values = self.__attn(queries, keys, values, attention_mask)
-        weighted_values = self.attn_dropout(weighted_values)
-        
-        # gating
-        weighted_values = gating * weighted_values
-        
-        return weighted_values
-
-
-    def __attn(self, q, k, v, attention_mask):
-        batch_size, seq_len, hidden_size = q.shape
-        
-        # reshape for multihead formulation, normalize as part of making sure max attn score doesn't explode
-        q = self.__real_norm(q.reshape(batch_size, seq_len, self.n_heads, self.head_size))
-        k = self.__real_norm(k.reshape(batch_size, seq_len, self.n_heads, self.head_size))
+        # reshape for multihead formulation
+        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        f1 = f1.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        f2 = f2.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        
+        # normalize focus vectors so focus scores don't explode
+        f1 = self.__real_norm(f1)
+        f2 = self.__real_norm(f2)
+        
+        # apply dropout to regularize focus scores (only dropout on one is fine because of the dot product)
+        f1 = self.drop(f1)
 
-        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of queries and keys
-        attn = (q * k).sum(dim = -1)
+        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
+        focus_scores = (f1 * f2).sum(dim = -1)
         
-        # STRONG scaling so that the max attention score is 5
-        attn = (attn / self.head_size) * 5
+        # STRONG scaling so that the max focus score is 5
+        focus_scores = (focus_scores / self.head_size) * 5
         
-        # masking out pad tokens (after demeaning as demeaning would be messed up)
-        attn += attention_mask
+        # masking out pad tokens
+        if attention_mask is not None:
+            focus_scores += attention_mask
         
-        # manual cumulative softmax
-        attn = torch.exp(attn)
-        attn = attn.unsqueeze(-1)
+        # manual softmax within cumulative sum
+        focus_scores = torch.exp(focus_scores)
+        focus_scores = focus_scores.unsqueeze(-1)
         
         # windowed cumsum 
-        s = torch.cumsum(attn * v, dim = 1)
+        s = torch.cumsum(focus_scores * v, dim = 1)
         s = s - self.__window_align(s)
-        z = torch.cumsum(attn, dim = 1)
+        z = torch.cumsum(focus_scores, dim = 1)
         z = z - self.__window_align(z)
         
         # finish off manual softmax by dividing by normalization term z
-        weighted_v = s / z
+        focused_v = s / z
+        
+        # regularize to stop queries/alignment from overfitting and overfitting reliance on sequence information
+        focused_v = self.drop(focused_v)
+        
+        # querying by measuring dot product alignment (normal scaling is fine here)
+        alignment = torch.sigmoid((q * focused_v).sum(dim = -1) / self.head_size**.5)
+        focused_v = alignment.unsqueeze(-1) * focused_v
         
         # concat heads
-        weighted_v = weighted_v.reshape(batch_size, seq_len, hidden_size)
+        focused_v = focused_v.reshape(batch_size, seq_len, hidden_size)
         
-        return weighted_v
+        return focused_v
 
 
     def __real_norm(self, x):
-        return (x - x.mean(dim = -1).unsqueeze(-1)) / x.std(dim = -1).unsqueeze(-1)
+        # normalize x on the last dimension (the head dimension in this case) with eps term for stability
+        return (x - x.mean(dim = -1).unsqueeze(-1)) / (x.std(dim = -1).unsqueeze(-1) + 1e-5)
 
 
     def __window_align(self, x):
@@ -101,11 +87,21 @@ class LeapBlock(nn.Module):
 
 
 
-class LeapLayer(nn.Module):
+class LeapBlock(nn.Module):
     def __init__(self, config, window_size):
-        super(LeapLayer, self).__init__()
-        self.attention = LeapBlock(config, window_size)
+        super(LeapBlock, self).__init__()
 
+        self.pre_norm = nn.LayerNorm(config.hidden_size)
+        
+        # modules for leap
+        self.Wq = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        self.Wf1 = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        self.Wf2 = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        self.Wv = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        self.leap = MultiheadLeap(config.hidden_size, config.n_heads, window_size,
+                                  dropout = config.hidden_dropout_prob)
+
+        # modules for feedforward layer (aka boom layer)
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
         self.activation = nn.GELU()
         self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size, bias = False)
@@ -113,16 +109,27 @@ class LeapLayer(nn.Module):
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, mod, attention_mask):        
-        mod = mod + self.attention(mod, attention_mask)
+    def forward(self, mod, attention_mask):
+        # pre-norming
+        mod_normed = self.pre_norm(mod)
         
-        mod = mod + self.__boom(mod)
+        # transformations so each matrix has its own purpose
+        queries = self.Wq(mod_normed)
+        focus1 = self.Wf1(mod_normed)
+        focus2 = self.Wf2(mod_normed)
+        values = self.Wv(mod_normed)
+        
+        # unnormed residual connection
+        mod = mod + self.leap(queries, focus1, focus2, values, attention_mask)
+        
+        # feedforward layer with pre-norming
+        mod_normed = self.pre_norm(mod)
+        mod = mod + self.__boom(self.boom_norm(mod_normed))
         
         return mod
 
 
     def __boom(self, mod):
-        mod = self.boom_norm(mod)
         mod = self.boom(mod)
         mod = self.activation(mod)
         mod = self.unboom(mod)
@@ -140,7 +147,7 @@ class LeapDecoder(nn.Module):
     def __init__(self, config):
         super(LeapDecoder, self).__init__()
         self.config = config
-        self.decoders = nn.ModuleList([LeapLayer(config, window_size)
+        self.decoders = nn.ModuleList([LeapBlock(config, window_size)
                                        for _, window_size in zip(range(config.n_layer), config.window_sizes)])
         
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
@@ -176,6 +183,10 @@ class LeapConfig(PretrainedConfig):
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, hidden_dropout_prob = .1, initializer_range = .02):
         
+        # check head sizes
+        assert hidden_size % n_heads == 0, "hidden_size is not divisible by n_heads"
+        
+        # check window sizes (and set them automatically if not set)
         assert not (use_local_att is False and window_sizes is not None), \
             "window sizes set when not using local attention"
 

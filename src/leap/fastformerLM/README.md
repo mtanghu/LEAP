@@ -2,7 +2,9 @@
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
 
-This README will summarize Additive Attention mathematics and annotate a number of its details, show a unique linearization process/math (which allows for RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention. 
+This README will summarize Additive Attention mathematics and annotate a number of its details, show a unique linearization process/math (which allows for RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
+
+The code at `fastformer.py` is annotated with how the equations from the paper and this repo relate to code.
 
 ## Usage & Development
 
@@ -33,8 +35,10 @@ model = FastformerForCausalLM(config)
 # this model is compatible with huggingface and its "trainer" interface
 from transformers import Trainer
 trainer = Trainer(
-    model=model,
-    train_dataset=<YOUR TOKENIZED DATASET>
+    model = model,
+    args = <YOUR TRAINING ARGS>,
+    train_dataset = <YOUR TOKENIZED DATASET>,
+    ...<YOUR OTHER TRAINER ARGS>
 )
 
 trainer.train()
@@ -175,21 +179,21 @@ Because this is a causal language model the code is structured like one and impl
 
 ![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/src/leap/fastformerLM/preliminary_results.png?raw=True)
 
-Plotted is the validation bits per character of the Additive Attention models (blue and orange) compared to full attention model (GPT2 in green) with the model sizes stated in the legend trained on Wikitext-2 using a T5 tokenizer with sequence lengths of 2048. The "Windowed Additive Attention" uses local Additive Attention explained in the "Local Additive Attention (or Windowed Attention)" section.  After loading the model with the lowest validation perplexity, the test set perplexity for Additive Attention was 86.8, for Windowed Additive Attention 54.2, and for GPT2 62.9.
+Plotted is the validation perplexity of the Additive Attention models (blue and orange) compared to full attention model (GPT2 in green) with the model sizes stated in the legend trained on Wikitext-2 using a T5 tokenizer with sequence lengths of 2048. The "Windowed Additive Attention" uses local Additive Attention explained in the "Local Additive Attention (or Windowed Attention)" section.  After loading the model with the lowest validation perplexity, the test set perplexity for Additive Attention was 74.3, for Windowed Additive Attention 47.1, and for GPT2 59.7.
 
-As we can see on this small scale experiment, the Windowed Additive Attention strongly outcompetes the standard Additive Attention and converges faster with less perplexity compared to even GPT2 (of the same size). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Bigger tests are on the way!!
+As we can see on this small scale experiment, the Windowed Additive Attention strongly outcompetes the standard Additive Attention and converges faster with less perplexity compared to even GPT2 (with slightly less parameters too). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Furthermore, this model beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2))
 
-**Speed:** Both Additive Attention training runs took ~24 minutes while GPT2 took ~36 minutes (1.5x) which should become more pronounced at context lengths greater than 2048. Note again that it's tricky to do a lot better than full attention in terms of wall time because of highly optimized and paralellizable matrix multiplication algorithms.
+**Speed:** Both Additive Attention training runs took ~29 minutes while GPT2 took ~45 minutes (1.5x the time) which should become more pronounced at context lengths greater than 2048. Also the convergence was faster.
 
 ### Training details
 
-All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2. Code can be found in ``FastLM.ipynb`` which uses the [HuggingFace 🤗 Transfomers](https://huggingface.co/) specifically the [Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer).
+All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2 and fp16 mixed precision. Code can be found in ``FastLM.ipynb`` which uses the [HuggingFace 🤗 Transfomers](https://huggingface.co/) specifically the [Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer).
 
 Model details: all models had a model dimension of 128 (feedforward dimension is 4x the model dimension), 4 attention heads, 6 layers and dropout probability of .1 on embedding, attention, and feedforward layers. The window sizes for Local Additive Attention were [4, 8, 16, 32, 64, 2028] as per the heurstic described.
 
 Optimizer: [AdamW](https://arxiv.org/abs/1711.05101) with learning rate of 5e-4 to start and linear annealing, betas=(.9, .999) and weight decay = .01. Mixed precision with gradient clipping = 1 (max norm) is also used.
 
-**Tuning** Very little tuning has been done to optimize performance, only learning rates of [1e-4, 5e-4, 1e-3] have been tried (5e-4 is best for both GPT and Additive Attention in preliminary experiments) and only a few different kind of window size settings have been explored (<20). No tuning on the test set was performed and the only evaluation on the test set performed was for the results shown.
+**Tuning** Very little tuning has been done to optimize performance, only learning rates of [1e-4, 5e-4, 1e-3] have been tried (5e-4 is best for both GPT and Additive Attention in preliminary experiments) and only a few different kind of window size settings have been explored (<20). No tuning on the test set was performed.
 
 
 ## References
@@ -207,20 +211,20 @@ Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020, November). Transfo
 
 Bahdanau, D., Cho, K., & Bengio, Y. (2014). Neural machine translation by jointly learning to align and translate. _arXiv preprint arXiv:1409.0473_.
 
-Shoeybi, M., Patwary, M., Puri, R., LeGresley, P., Casper, J., & Catanzaro, B. (2019). Megatron-lm: Training multi-billion parameter language models using model parallelism. _arXiv preprint arXiv:1909.08053_.
+Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., & Sutskever, I. (2019). Language models are unsupervised multitask learners. OpenAI blog, 1(8), 9.
 
 Müller, R., Kornblith, S., & Hinton, G. E. (2019). When does label smoothing help?. _Advances in neural information processing systems, 32_.
 
 Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. _Advances in neural information processing systems, 30_.
 
-Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra, G., Roberts, A., ... & Fiedel, N. (2022). Palm: Scaling language modeling with pathways. _arXiv preprint arXiv:2204.02311_
-
 Radford, A., Narasimhan, K., Salimans, T., & Sutskever, I. (2018). Improving language understanding by generative pre-training.
 
 Press, O., & Wolf, L. (2016). Using the output embedding to improve language models. _arXiv preprint arXiv:1608.05859_.
 
-Chen, Q., & Wu, R. (2017). CNN is all you need. _arXiv preprint arXiv:1712.09662_.
-
 Kaplan, Jared, et al. "Scaling laws for neural language models." _arXiv preprint arXiv:2001.08361_ (2020).
+
+Melis, G., Kočiský, T., & Blunsom, P. (2019). Mogrifier lstm. arXiv preprint arXiv:1909.01792.
+
+Merity, S., Keskar, N. S., & Socher, R. (2017). Regularizing and optimizing LSTM language models. arXiv preprint arXiv:1708.02182.
 
 Loshchilov, I., & Hutter, F. (2017). Decoupled weight decay regularization. _arXiv preprint arXiv:1711.05101_.
