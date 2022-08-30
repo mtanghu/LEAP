@@ -98,7 +98,7 @@ Plotted is the validation perplexity of the LEAP Transformer (blue) and GPT2 (or
 
 As we can see on this small scale experiment, the LEAP Transformer converges faster with less perplexity compared to even GPT2 (of the same size). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Furthermore, this model beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2))
 
-**Speed:** Both Additive Attention training runs took ~24 minutes while GPT2 took ~36 minutes (1.5x) which should become more pronounced at context lengths greater than 2048. Also the convergence was faster.
+**Speed:** The LEAP Tranformer training run took ~25 minutes while GPT2 took ~45 minutes (1.8x) which should become more pronounced at context lengths greater than 2048. Also the convergence was faster.
 
 ### Training details
 
