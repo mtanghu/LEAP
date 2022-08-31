@@ -1,10 +1,11 @@
+
 # Additive Attention Is All You Need?
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
 
-This README will summarize Additive Attention mathematics and annotate a number of its details, show a unique linearization process/math (which allows for RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
+This README will show a new *strongly* scaled dot-product which should be **of independent interest to Softmax-based Attention as a whole**, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
 
-The code at `fastformer.py` is annotated with how the equations from the paper and this repo relate to code.
+The code at `fastformer.py` in this folder is annotated with how the equations from the paper and this repo relate to code and should be easy to read (the relevant class would be `FastSelfAttention` at the top of the code).
 
 ## Usage & Development
 
@@ -44,6 +45,26 @@ trainer = Trainer(
 trainer.train()
 ```
 A more complete training example with a dataset, tokenization, and evaluations can be found at ``FastLM.ipynb`` in this folder which can be run with only 6GB of VRAM (GPU memory).
+
+## Strongly Scaled Dot-Product
+
+This project encounted some training instability and after some investigation found that the softmax step (which is done manually in this project) yielded numbers which would get too large and overflow, especially for fp16 training. This may be of independent interest to training instability in large language models (say in [Megatron](https://arxiv.org/abs/1909.08053) or [PALM](https://arxiv.org/abs/2204.02311)) as the arguments apply shown in this section offer a reasonable explaination for why there may be training instability particularly in large models.
+
+### Normal Scaled Dot-Product Attention 
+
+<div></div>Let's consider the normal context where an "Attention score" $A_{ij}$ of a query and a key is calculated as follows 
+
+$$
+A_{ij} = {exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}}) \over \sum\limits_{j= 0}^{N} exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}})}
+$$
+
+</br><div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attentional span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys, an analgous situation would be calculating the "weight" of a test on the final grade) strengthening this "limited attentional span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
+
+</br><div></div>**Why scale by $1 \over \sqrt{d_{model}}$?**  According to [Attention is All you Need](https://arxiv.org/abs/1706.03762) (Viswani et al. 2017), the reason is simple. Consider that \boldsymbol{Q_i} and $K_j$ are random normal vectors (which may be the case with random initialization and when using layernorm), it is easy to show then that dot product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ will have mean of 0 and std of $\sqrt{d_{model}}$ which remedied simply by scaling by $1 \over \sqrt{d_{model}}$ bringing the std back to 1. The authors *only* note that the reason for doing this is to improve the gradients/learning behavior when $d_{model}$ is large which would make it difficult for queries and keys that need to attend to each other to overcome being having an exponentially small similarity at initializaiton (and will thus have a very tiny gradient) which gets worse with scale.
+
+### What is the issue?
+
+</br><div></div>While the reason provided for scaling by the original paper/authors is valid and makes sense, it only considers where $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are *random-normal*. In fact, as training happens and parameters are updated through optimization/gradient descent, we can be more and more **assured that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ will be neither be random nor normal**. On the matter of normality , even if LayerNorm is used to normalize the embedding vector $\boldsymbol{x_i}$ before be transformed into $\boldsymbol{Q_i} = W_q \boldsymbol{x_i}$ and $\boldsymbol{K_j} = W_k \boldsymbol{x_i}$, the weight matrices $W_q$ and $W_k$ will be learned to make $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ not normal (there are good reasons for why this would happen, like a particular $\boldsymbol{K_j}$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence).  On the matter of randomness, there is an especially problematic scenario when $\boldsymbol{Q_i} == \boldsymbol{K_j}$ which is very likely to happen when there is highly deterministic token interactions/sequence information that needs to be conferred (like verb conjugation or subject-verb agreement where there is only one right answer). Even if we assume normality, it is easy to show that this case will cause the dot-product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ to have mean of $d_{model}$ (!!) (because this would be equivalent to dot producting a vector with itself and the mean of a normal variable squared is 1).
 
 
 ## Brief Explanation of Additive Attention
@@ -173,7 +194,7 @@ Because this is a causal language model the code is structured like one and impl
 - Learned positional embeddings ([GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2, though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2
 - Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
-- Attention masking of pad tokens ([Attnetion is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
+- Attention masking of pad tokens ([Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
 
 ## Results
 
@@ -205,7 +226,9 @@ Beltagy, I., Peters, M. E., & Cohan, A. (2020). Longformer: The long-document tr
 
 Zaheer, M., Guruganesh, G., Dubey, K. A., Ainslie, J., Alberti, C., Ontanon, S., ... & Ahmed, A. (2020). Big bird: Transformers for longer sequences. _Advances in Neural Information Processing Systems_, _33_, 17283-17297.
 
-Devlin, J., Chang, M. W., Lee, K., & Toutanova, K. (2018). Bert: Pre-training of deep bidirectional transformers for language understanding. _arXiv preprint arXiv:1810.04805_.
+Shoeybi, M., Patwary, M., Puri, R., LeGresley, P., Casper, J., & Catanzaro, B. (2019). Megatron-lm: Training multi-billion parameter language models using model parallelism. _arXiv preprint arXiv:1909.08053_.
+
+Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra, G., Roberts, A., ... & Fiedel, N. (2022). Palm: Scaling language modeling with pathways. _arXiv preprint arXiv:2204.02311_.
 
 Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020, November). Transformers are rnns: Fast autoregressive transformers with linear attention. In _International Conference on Machine Learning_ (pp. 5156-5165). PMLR.
 
