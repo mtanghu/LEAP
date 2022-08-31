@@ -14,6 +14,7 @@ class FastSelfAttention(nn.Module):
         assert config.hidden_size % self.n_heads == 0, "hidden_size is not divisible by n_heads"
         self.head_size = config.hidden_size // self.n_heads
         self.window_size = window_size
+        self.rescale_value = config.rescale_value
 
         # only considering single head for now
         self.Wquery = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
@@ -67,7 +68,7 @@ class FastSelfAttention(nn.Module):
         attn = (x * learned_vector).sum(dim = -1)
         
          # strong scaling so that the max attention score is 7 (because of previous norming)
-        attn = (attn / self.head_size) * 7
+        attn = (attn / self.head_size) * self.rescale_value
         
         # masking out pad tokens
         attn += attention_mask
@@ -183,7 +184,8 @@ class FastformerLMConfig(PretrainedConfig):
     model_type = "FastformerForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, hidden_dropout_prob = .1, initializer_range = .02):
+                 n_layer = 4, rescale_value = 7, hidden_dropout_prob = .1,
+                 initializer_range = .02):
         
         assert not (use_local_att is False and window_sizes is not None), \
             "window sizes set when not using local attention"
@@ -203,7 +205,7 @@ class FastformerLMConfig(PretrainedConfig):
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
-            n_layer = n_layer, hidden_dropout_prob = hidden_dropout_prob,
+            n_layer = n_layer, rescale_value = rescale_value, hidden_dropout_prob = hidden_dropout_prob,
             initializer_range = initializer_range
         )
 

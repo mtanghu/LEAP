@@ -7,12 +7,13 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 class MultiheadLeap(nn.Module):
-    def __init__(self, hidden_size, n_heads, window_size, dropout = .1):
+    def __init__(self, hidden_size, n_heads, window_size, rescale = 8, dropout = .1):
         super(MultiheadLeap, self).__init__()
         self.n_heads = n_heads
         self.hidden_size = hidden_size
         self.head_size = hidden_size // n_heads
         self.window_size = window_size
+        self.rescale_value = 8
 
         self.drop = nn.Dropout(dropout)
 
@@ -36,8 +37,8 @@ class MultiheadLeap(nn.Module):
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
         focus_scores = (f1 * f2).sum(dim = -1)
         
-        # STRONG scaling so that the max focus score is 8
-        focus_scores = (focus_scores / self.head_size) * 8
+        # STRONG scaling
+        focus_scores = (focus_scores / self.head_size) * self.rescale_value
         
         # masking out pad tokens
         if attention_mask is not None:
@@ -99,7 +100,7 @@ class LeapBlock(nn.Module):
         self.Wf2 = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         self.Wv = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         self.leap = MultiheadLeap(config.hidden_size, config.n_heads, window_size,
-                                  dropout = config.hidden_dropout_prob)
+                                  rescale = config.rescale_value, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
@@ -181,7 +182,8 @@ class LeapConfig(PretrainedConfig):
     model_type = "LeapForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, hidden_dropout_prob = .1, initializer_range = .02):
+                 n_layer = 4, rescale_value = 8, hidden_dropout_prob = .1,
+                 initializer_range = .02):
         
         # check head sizes
         assert hidden_size % n_heads == 0, "hidden_size is not divisible by n_heads"
@@ -205,7 +207,7 @@ class LeapConfig(PretrainedConfig):
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
-            n_layer = n_layer, hidden_dropout_prob = hidden_dropout_prob,
+            n_layer = n_layer, rescale_value = rescale_value, hidden_dropout_prob = hidden_dropout_prob,
             initializer_range = initializer_range
         )
 
@@ -237,7 +239,7 @@ class LeapForCausalLM(PreTrainedModel):
         attention_mask = (1.0 - attention_mask) * -10000.0
         attention_mask = attention_mask.unsqueeze(-1)
         
-        embds=self.word_embedding(input_ids)
+        embds = self.word_embedding(input_ids)
         layer_outputs = self.leap_model(embds, attention_mask)
         layer_outputs = self.last_norm(layer_outputs)
         logits = self.proj_logits(layer_outputs)

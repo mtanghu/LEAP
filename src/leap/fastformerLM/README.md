@@ -28,7 +28,8 @@ config = FastformerLMConfig(
     window_sizes = None, # window sizes to use for windowed/local Additive Attention for each layer (set automatically if None)
     n_heads = 4, # number of heads to use in multi-head attention
     initializer_range = .02, # standard deviation for weight initialization
-    hidden_dropout_prob = .1 # dropout value used for embeddings, attention, and feedforward layers
+    hidden_dropout_prob = .1, # dropout value used for embeddings, attention, and feedforward layers
+    rescale_value = 7, # what to rescale the attention values with, set lower if you have NaN loss
 )
 
 model = FastformerForCausalLM(config)
