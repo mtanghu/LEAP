@@ -36,8 +36,8 @@ class MultiheadLeap(nn.Module):
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
         focus_scores = (f1 * f2).sum(dim = -1)
         
-        # STRONG scaling so that the max focus score is 5
-        focus_scores = (focus_scores / self.head_size) * 5
+        # STRONG scaling so that the max focus score is 8
+        focus_scores = (focus_scores / self.head_size) * 8
         
         # masking out pad tokens
         if attention_mask is not None:
@@ -80,7 +80,7 @@ class MultiheadLeap(nn.Module):
         # zero out the last window_size vectors, and roll these vectors to the front
         # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
         clone_x = torch.clone(x)
-        clone_x[:,-self.window_size:] *= 0
+        clone_x[:,-self.window_size:] = 0
         clone_x = torch.roll(clone_x, self.window_size, dims = 1)
         
         return clone_x

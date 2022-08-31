@@ -59,25 +59,25 @@ class FastSelfAttention(nn.Module):
         # reshape for multihead attention
         x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
-        # norm for stability and so that the strong scaling step works
+        # norm for stability (as a part of strong scaling)
         x = self.__real_norm(x)
         learned_vector = self.__real_norm(learned_vector)
                 
         # manual down projection for speed (instead of using einsum)
         attn = (x * learned_vector).sum(dim = -1)
         
-         # STRONG scaling so that the max attention score is 5 (because of previous norming)
-        attn = (attn / self.head_size) * 5
+         # strong scaling so that the max attention score is 7 (because of previous norming)
+        attn = (attn / self.head_size) * 7
         
         # masking out pad tokens
         attn += attention_mask
         
-        # manual softmax and cumulative sum
+        # manual softmax and cumulative sum steps (equations 5/10 in github)
         attn = torch.exp(attn)
         attn = attn.unsqueeze(3)
         x = x.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
-        ## windowed cumsum
+        ## windowed cumsum (equation 10 in github)
         s = torch.cumsum(attn * x, dim = 1)
         s = s - self.__window_align(s)
         z = torch.cumsum(attn, dim = 1)
