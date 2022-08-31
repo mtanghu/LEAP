@@ -16,12 +16,11 @@ class FastSelfAttention(nn.Module):
         self.window_size = window_size
         self.rescale_value = config.rescale_value
 
-        # only considering single head for now
-        self.Wquery = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        # one larger projection matrix is equivalent to having seperate projection matrices and is faster
+        self.projections = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias = False)
+        
         self.query_attn = nn.Parameter(torch.randn(self.n_heads, self.head_size) * config.initializer_range)
-        self.Wkeys = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
         self.key_attn = nn.Parameter(torch.randn(self.n_heads, self.head_size) * config.initializer_range)
-        self.Wvalues = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
 
         self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.attn_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -30,16 +29,14 @@ class FastSelfAttention(nn.Module):
     def forward(self, mod, attention_mask):
         mod = self.attn_norm(mod)
 
-        query = self.Wquery(mod)
-        keys = self.Wkeys(mod)
-        values = self.Wvalues(mod)
+        queries, keys, values = self.projections(mod).chunk(3, dim = -1)
         
         # equations (3-4)
-        pooled_query = self.__additive_attn(query, self.query_attn, attention_mask)
-        pooled_query = self.attn_dropout(pooled_query)
+        pooled_queries = self.__additive_attn(queries, self.query_attn, attention_mask)
+        pooled_queries = self.attn_dropout(pooled_queries)
         
         # corresponds to "p_i = q * k_i" in paper
-        mixed_keys = pooled_query * keys
+        mixed_keys = pooled_queries * keys
         
         # equations (5-6)
         pooled_keys = self.__additive_attn(mixed_keys, self.key_attn, attention_mask)

@@ -95,10 +95,8 @@ class LeapBlock(nn.Module):
         self.pre_norm = nn.LayerNorm(config.hidden_size)
         
         # modules for leap
-        self.Wq = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.Wf1 = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.Wf2 = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
-        self.Wv = nn.Linear(config.hidden_size, config.hidden_size, bias = False)
+        # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
+        self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
         self.leap = MultiheadLeap(config.hidden_size, config.n_heads, window_size,
                                   rescale = config.rescale_value, dropout = config.hidden_dropout_prob)
 
@@ -114,11 +112,8 @@ class LeapBlock(nn.Module):
         # pre-norming
         mod_normed = self.pre_norm(mod)
         
-        # transformations so each matrix has its own purpose
-        queries = self.Wq(mod_normed)
-        focus1 = self.Wf1(mod_normed)
-        focus2 = self.Wf2(mod_normed)
-        values = self.Wv(mod_normed)
+        # projections so each matrix has its own purpose
+        queries, focus1, focus2, values = self.projections(mod_normed).chunk(4, dim = -1)
         
         # unnormed residual connection
         mod = mod + self.leap(queries, focus1, focus2, values, attention_mask)
