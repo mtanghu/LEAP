@@ -37,7 +37,7 @@ class MultiheadLeap(nn.Module):
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
         focus_scores = (f1 * f2).sum(dim = -1)
         
-        # STRONG scaling
+        # strong scaling
         focus_scores = (focus_scores / self.head_size) * self.rescale_value
         
         # masking out pad tokens

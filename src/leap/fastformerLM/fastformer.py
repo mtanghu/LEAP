@@ -64,7 +64,7 @@ class FastSelfAttention(nn.Module):
         # manual down projection for speed (instead of using einsum)
         attn = (x * learned_vector).sum(dim = -1)
         
-         # strong scaling so that the max attention score is 7 (because of previous norming)
+         # strong scaling
         attn = (attn / self.head_size) * self.rescale_value
         
         # masking out pad tokens
