@@ -1,8 +1,9 @@
+
 # Additive Attention Is All You Need?
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
 
-This README will show a new *strongly* scaled dot-product which should be **of independent interest to Softmax-based Attention as a whole**, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
+This README will show a new *strongly* scaled dot-product which should be of independent interest to Softmax-based Attention as a whole, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
 
 The code at `fastformer.py` in this folder is annotated with how the equations from the paper and this repo relate to code and should be easy to read (the relevant class would be `FastSelfAttention` at the top of the code).
 
@@ -46,9 +47,9 @@ trainer.train()
 ```
 A more complete training example with a dataset, tokenization, and evaluations can be found at ``FastLM.ipynb`` in this folder which can be run with only 6GB of VRAM (GPU memory).
 
-## Strongly Scaled Dot-Product
+## Rescaled Dot-Product
 
-This project encounted some training instability and after some investigation found that the softmax step (which is done manually in this project) yielded numbers which would get too large and overflow, especially for fp16 training. This may be of independent interest to training instability in large language models (say in [Megatron](https://arxiv.org/abs/1909.08053) or [PALM](https://arxiv.org/abs/2204.02311)) as the arguments apply shown in this section offer a reasonable explaination for why there may be training instability particularly in large models.
+This project encounted some training instability, where some preliminary investigation found that the attention/focus scores that were being generated were absurdly large/small. This may be of independent interest to training instability in large language models (say in [Megatron](https://arxiv.org/abs/1909.08053) or [PALM](https://arxiv.org/abs/2204.02311)) as the arguments shown in this section may offer a reasonable explaination for why there may be training instability particularly in large models.
 
 ### Normal Scaled Dot-Product Attention 
 
@@ -58,21 +59,31 @@ $$
 A_{ij} = {exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}}) \over \sum\limits_{j= 0}^{N} exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}})}
 $$
 
-</br><div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attentional span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys, an analgous situation would be calculating the "weight" of a test on the final grade) strengthening this "limited attentional span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
+</br><div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attentional span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys, an analgous situation would be calculating "the weight of a test on the final grade") strengthening this "limited attentional span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
 
-</br><div></div>**Why scale by $1 \over \sqrt{d_{model}}$?**  According to [Attention is All you Need](https://arxiv.org/abs/1706.03762) (Viswani et al. 2017), the reason is simple. Consider that $\boldsymbol{Q_i}$ and $K_j$ are random normal vectors (which may be the case with random initialization and when using layernorm), it is easy to show then that dot product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ will have mean of 0 and std of $\sqrt{d_{model}}$ which is remedied simply by scaling by $1 \over \sqrt{d_{model}}$ bringing the std back to 1. The authors note that the reason for doing this is to improve the gradients/learning behavior when $d_{model}$ is large which would make it difficult for queries and keys that need to attend to each other to overcome being having an exponentially small similarity at initializaiton (and will thus have a very tiny gradient) which gets worse with scale.
+</br><div></div>**Why scale by $1 \over \sqrt{d_{model}}$?**  According to [Attention is All you Need](https://arxiv.org/abs/1706.03762) (Viswani et al. 2017), the reason is simple. Consider that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are random normal vectors (which may be the case with random initialization and when using layernorm), it is easy to show then that the dot product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ will have mean of 0 and std of $\sqrt{d_{model}}$ which is remedied simply by scaling by $1 \over \sqrt{d_{model}}$ bringing the std back to 1. The authors note that this can "(push) the softmax function into regions where it has extremely small gradients" when $d_{model}$ is large.
 
 ### What is the issue?
 
-</br><div></div>While the reason provided for scaling by the original paper/authors is valid and makes sense, it only considers where $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are *random-normal*. In fact, as training happens and parameters are updated through optimization/gradient descent, we can be more and more **assured that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ will be neither be random nor normal**. On the matter of normality , even if LayerNorm is used to normalize the embedding vector $\boldsymbol{x_i}$ before be transformed into $\boldsymbol{Q_i} = W_q \boldsymbol{x_i}$ and $\boldsymbol{K_j} = W_k \boldsymbol{x_i}$, the weight matrices $W_q$ and $W_k$ will be learned to make $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ not normal (there are good reasons for why this would happen, like a particular $\boldsymbol{K_j}$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence).  On the matter of randomness, there is an especially problematic scenario when $\boldsymbol{Q_i} == \boldsymbol{K_j}$ which is very likely to happen when there is highly deterministic token interactions/sequence information that needs to be conferred (like verb conjugation or subject-verb agreement where there is only one right answer). Even if we assume normality, it is easy to show that this case will cause the dot-product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ to have mean of $d_{model}$ (!!) (because $\boldsymbol{Q_i} \cdot \boldsymbol{K_j} = \sum\limits_{z=0}^{d_{model-1}} r_z^2$ where $r$ is a random normal variable which would likewise have mean of 1). Note that this general argument applies even when $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are only *slightly* correlated, and at large scales with huge $d_{model}$ values it can be very easy for there to be spurious correlations between parts of $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ after only mild training. While there is no conclusive argument that this will necessarily cause loss spikes, this already causes 
+<div></div>While the reason provided for scaling by the original paper/authors is valid and makes sense, it only considers where $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are *random and normal*. In fact, as training happens and parameters are updated through optimization/gradient descent, we can be more and more **assured that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ will be neither be random nor normal**.
 
-### Why is this an issue only at large scales?
+<div></div>On the matter of normality , even if LayerNorm is used to normalize the embedding vector $\boldsymbol{x_i}$ before be transformed into $\boldsymbol{Q_i} = W_q \boldsymbol{x_i}$ and $\boldsymbol{K_j} = W_k \boldsymbol{x_i}$, the weight matrices $W_q$ and $W_k$ will be learned to make $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ not normal (there are good reasons for why this would happen, like a particular $\boldsymbol{K_j}$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence). 
 
-We propose 2 claims (which will be tested soon):
+<div></div>On the matter of randomness, there is an especially problematic scenario when $\boldsymbol{Q_i} == \boldsymbol{K_j}$ which is very likely to happen when there is highly deterministic token interactions where a token would need to strongly pay attention to another token (like verb conjugation or subject-verb agreement where there is only one right answer). Even if we assume normality, it is easy to show that this case will cause the dot-product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ to have mean of $d_{model}$ (!!) (because $\boldsymbol{Q_i} \cdot \boldsymbol{K_j} = \sum\limits_{z=0}^{d_{model-1}} r_z^2$ where $r$ is a random normal variable which would likewise have mean of 1, also consider the case that $\boldsymbol{Q_i} == -\boldsymbol{K_j}$ when the there should be no alignment). 
 
-1. Larger models can have larger activations, which make abnomormally large $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ (thus violating a normality assumption) and can thus create
-2. Larger models are more capable of memorizing/having the representational capacity to make 
+<div></div>Note that this general argument applies even when $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are only *slightly* correlated, and at large scales with huge $d_{model}$ values it can be very easy for there to be spurious correlations between parts of $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ after only mild training that will blow up the dot-product similarity. While there is no conclusive argument that this will necessarily cause loss spikes, this does create training instability for the simplified verisions of attention explored in this project, and in general having extremely large or extremely small attention values that get more extreme with scale would likely create some kind of training issues that at the very least "(push) the softmax function into regions where it has extremely small gradients" (the original rationale for scaled dot-product attention).
 
+### The fix
+
+<div></div>This project simply enforces normality (to the extent possible) using an unparameterized LayerNorm, dividing by $d_{model}$ and not $\sqrt{d_{model}}$, and multiplying by a set constant $s$.  In rigorous terms, let us define this "rescaled dot-product" using the symbol " $\bar{\cdot}$ " where for two vectors $\boldsymbol{x}, \boldsymbol{y}$ of dimension $d_{model}$:
+
+$$\boldsymbol{x}\ \bar{\cdot}\ \boldsymbol{y} = \left({ \boldsymbol{x} - E[\boldsymbol{x}] \over \sqrt{Var[\boldsymbol{x}]}} \cdot  {\boldsymbol{y} - E[\boldsymbol{y}] \over \sqrt{Var[\boldsymbol{y}]} }\right) *{s \over d_{model}}$$
+
+<div></div>What this does is enforce that even if $\boldsymbol{x} ==\boldsymbol{y}$, after normalization their dot product will have mean $d_{model}$, which we divide by to bring the mean to 1. Then to allow for larger dot-product similarity values, we multiply by the set constant $s$ (15 seems to work fine and, after exponentiation in the softmax, e^15 should be larger than what anyone would reasonably need) to rescale the the size of the dot-product. Thus, this "recaled dot-product" will not produce larger values with larger $d_{model}$. 
+
+It should be recognized that LayerNorm/normalizing a vector does not make the vector a "normal" vector (where each element is drawn from the normal distribution). This doesn't seem to be a problem emperically though. This project will work on concrete experments to show this as well as the value of this technique in the future, however preliminary measurement finds that this still keeps attention sparse (in fact the presoft-max dot product similarities quickly approach 15) and does effectively limit the maximum value for this dot product (only a max value of ~16 was ever found).
+
+<div></div>***Note: The rest of this README is meant to explain Additive Attention. To not confuse readers, all the dot products are not replaced with " $\bar{\cdot}$ " (a down projection is a dot-product) but do note in the implementation that all dot products are replaced.***
 
 ## Brief Explanation of Additive Attention
 
@@ -85,7 +96,7 @@ This project considers the Additive Attentional mechanism described in [Wu et al
 - <div></div>Get an “attention weight” $\alpha_{i}$ (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
 
 $$
-	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_{j}} / \sqrt{d_{model}})}
+	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_{i}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_{j}})}
 $$
 
 - <div></div>Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0, note how this offers "explainability"), and sum over the sequence dimension to get a “global attention vector” ${\boldsymbol{g}}$ that contains information about the entire sequence, i.e.
@@ -94,7 +105,7 @@ $$
 	(2)\ \boldsymbol{g} = \sum_{i=1}^{N} \alpha_{i} \boldsymbol{x_i}
 $$
 
-<div></div>Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $N$. Note that this is also $O(1)$ in path length in the same way full attention is $O(1)$ path length as any token $\boldsymbol{x_{i}}$ can directly confer information to ${\boldsymbol{g}}$ without having to go through other tokens (and just like full attention, this is aided by the softmax which will clear away unimportant tokens by down weighting them).
+<div></div>Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $N$. Note that this is also $O(1)$ in path length in the same way full attention is $O(1)$ path length as any token $\boldsymbol{x_{i}}$ can directly confer information to ${\boldsymbol{g}}$ without having to go through other tokens (and just like full attention, this is aided by the softmax which will clear away unimportant tokens by down weighting them). Note that the original paper uses a scaling term, however we address that in the **Rescaled Dot Product** section.
   
 \* Not to be confused with [Additive Attention by Bahdanau et al. 2014](https://arxiv.org/abs/1409.0473v7)
 
@@ -105,31 +116,31 @@ Causal Language Modeling or decoder-based language modeling is where a language 
 - To do this rigorously, let's start by substituting equation (1) into equation (2)
 
 $$
-	(3)\ \boldsymbol{g} = \sum\limits_{\ell=1}^{N}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}*\boldsymbol{x_\ell}
+	(3)\ \boldsymbol{g} = \sum\limits_{\ell=1}^{N}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
 $$
 
 
 - <div></div>Now let us instead create $\boldsymbol{g_{i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
-	(4)\ \boldsymbol{g_i} = \sum\limits_{\ell=1}^{i}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}*\boldsymbol{x_\ell}
+	(4)\ \boldsymbol{g_i} = \sum\limits_{\ell=1}^{i}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
 $$
 
 
 - <div></div>Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
-	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
+	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell})}
 $$
 
 - <div></div>Where the summation terms in the numerator and denominator for each $i$ can be calculated simply by cumulative sum. To elaborate on this and the linear complexity, we can write this as a kind of RNN as Katharpoulos et al. (2020) did.
 
 $$
-	(6)\ \boldsymbol{s_i} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) *\boldsymbol{x_i}
+	(6)\ \boldsymbol{s_i} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_i}) *\boldsymbol{x_i}
 $$
 
 $$
-	(7)\ z_i = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_i} / \sqrt{d_{model}}) 
+	(7)\ z_i = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_i}) 
 $$
 
 $$
@@ -145,7 +156,7 @@ Note that Katharpoulos et al. didn't quite have the same process, they instead h
 - <div></div>First let us reconsider equation 5 (which is the Additive Attention equation) for a local/windowed version which only considers the previous $k$ tokens (including itself)
 
 $$
-	(9)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=max(i-k+1,\ 0)}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=max(i-k+1,\ 0)}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}})}
+	(9)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=max(i-k+1,\ 0)}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} ) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=max(i-k+1,\ 0)}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell})}
 $$
 
 - <div></div>Note that we need to use a $max$ in case the backwards context or "window" is non-existent or paritally non-existent for $i < k$. Then to calculate this with linear time complexity, we simply rewrite the sum, but this time, un-simplifying!
@@ -153,33 +164,33 @@ $$
 
 $$
 	(10)\ \ 
-\boldsymbol{g_i} =  {\sum\limits_{\ell=0}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell} - \sum\limits_{\ell=0}^{max(i-k,\ -1)}exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) *\boldsymbol{x_\ell}
+\boldsymbol{g_i} =  {\sum\limits_{\ell=0}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) *\boldsymbol{x_\ell} - \sum\limits_{\ell=0}^{max(i-k,\ -1)}exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) *\boldsymbol{x_\ell}
 		\over
-\sum\limits_{\ell=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell} / \sqrt{d_{model}}) -\sum\limits_{\ell=0}^{max(i-k, -1)} exp(\boldsymbol{w}^T \boldsymbol{x_j} / \sqrt{d_{model}})}
+\sum\limits_{\ell=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) -\sum\limits_{\ell=0}^{max(i-k, -1)} exp(\boldsymbol{w}^T \boldsymbol{x_j})}
 $$
 
 - Where again, we can easily keep track of all 4 summation terms using cumulative sums. To show this in a different way, we can rewrite this as an RNN again to also emphasize the linearity.
 
 $$
-	(11)\ \boldsymbol{s_{i}} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) *\boldsymbol{x_{i}}
+	(11)\ \boldsymbol{s_{i}} = \boldsymbol{s_{i-1}} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}}) *\boldsymbol{x_{i}}
 $$
 
 $$
 	(12)\ 
 	\begin{cases}
-		\boldsymbol{s_{i}'} = \boldsymbol{s_{i-1}'} +exp(\boldsymbol{w}^T \boldsymbol{x_{i-k}} / \sqrt{d_{model}}) *\boldsymbol{x_{i-k}}, & \text{if }\ i \geq k\\
+		\boldsymbol{s_{i}'} = \boldsymbol{s_{i-1}'} +exp(\boldsymbol{w}^T \boldsymbol{x_{i-k}}) *\boldsymbol{x_{i-k}}, & \text{if }\ i \geq k\\
 		\boldsymbol{s_{i}'} = 0, & \text{if  }\ i < k
 	\end{cases}
 $$
 
 $$
-	(13)\ z_{i} = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}} / \sqrt{d_{model}}) 
+	(13)\ z_{i} = z_{i-1} +exp(\boldsymbol{w}^T \boldsymbol{x_{i}}) 
 $$
 
 $$
 	(14)\ 
 	\begin{cases}
-		z_{i}' = z_{i-1}' +exp(\boldsymbol{w}^T \boldsymbol{x_{i-k}} / \sqrt{d_{model}}) , & \text{if  }\ i \geq k\\
+		z_{i}' = z_{i-1}' +exp(\boldsymbol{w}^T \boldsymbol{x_{i-k}}) , & \text{if  }\ i \geq k\\
 		z_{i}' = 0, & \text{if  }\ i < k\\
 	\end{cases}
 $$
@@ -192,6 +203,10 @@ Note that this should be doable with [Transformers are RNNs](https://arxiv.org/p
 
 <div></div>For implementation in a language model, we need to pick the right $k$ value, though this project proposes to consider different $k$ values for each layer. After some mild experimentation, the heuristic chosen for this project is $k_\ell = 4(2^{\ell})$ where $\ell$ is the hidden layer number (starting from 0), then the last layer will be "global attention" (unlimited window size). The intuition here would be that the lower levels are parsing lower-level semantic information that is accumulated with a final global attention layer. Note that because bigger models already use more layers, this should probably only help the scaling potential of this model. 
 
+## Minor implementation details
+
+</br><div></div>A numerical stability term should added to the denominator of equations denominators of these equations in case the denominator gets very close to 0. Also to reiterate, recaled dot-products are used in place of the down projection, so instead of $\boldsymbol{w}^T \boldsymbol{x_i}$ (i.e. the down projection) we instead use $\boldsymbol{w}\ \bar{\cdot}\ \boldsymbol{x_i}$ where the definition of  " $ \bar{\cdot}\ $ " can be found in the **Rescaled Dot-Product** section. 
+
 ## Model Structure
 
 Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2 [paper for reference by Radford et al. (2019)](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf):
@@ -202,6 +217,7 @@ Because this is a causal language model the code is structured like one and impl
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2
 - Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
 - Attention masking of pad tokens ([Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
+- <div></div>Multihead Attention is implemented where the head size is $d_{model} \over n_{heads}$ with the same number of parameters as a single-head just like [Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762) which is carried over to GPT2
 
 ## Results
 
@@ -209,7 +225,7 @@ Because this is a causal language model the code is structured like one and impl
 
 Plotted is the validation perplexity of the Additive Attention models (blue and orange) compared to full attention model (GPT2 in green) with the model sizes stated in the legend trained on Wikitext-2 using a T5 tokenizer with sequence lengths of 2048. The "Windowed Additive Attention" uses local Additive Attention explained in the "Local Additive Attention (or Windowed Attention)" section.  After loading the model with the lowest validation perplexity, the test set perplexity for Additive Attention was 71.0, for Windowed Additive Attention 50.0, and for GPT2 59.7.
 
-As we can see on this small scale experiment, the Windowed Additive Attention strongly outcompetes the standard Additive Attention and converges faster with less perplexity compared to even GPT2 (with slightly less parameters too). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Furthermore, this model beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2))
+As we can see on this small scale experiment, the Windowed Additive Attention strongly outcompetes the standard Additive Attention and converges faster with less perplexity compared to even GPT2 (with slightly less parameters too). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Also because of the linear local attention, it may be more reasonable to believe that this model can scale up (as the combinations of local and global attentions should be able to model complex sequence information from short-range to long-range). Furthermore, this model beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on Wikitext-2 perplexity even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2)).
 
 **Speed:** Both Additive Attention training runs took ~30 minutes while GPT2 took ~48 minutes (1.6x the time) which should become more pronounced at context lengths greater than 2048 and larger model sizes. Also the convergence was faster.
 
