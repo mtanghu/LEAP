@@ -2,7 +2,7 @@
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
 
-This README will show a new rescaled dot-product which should be of independent interest to Softmax-based Attention as a whole, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
+This README will show a new *strongly* scaled dot-product which should be of independent interest to Softmax-based Attention as a whole, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
 
 The code at `fastformer.py` in this folder is annotated with how the equations from the paper and this repo relate to code and should be easy to read (the relevant class would be `FastSelfAttention` at the top of the code).
 
@@ -55,7 +55,7 @@ This project encounted some training instability, where some preliminary investi
 <div></div>Let's consider the normal context where an "Attention score" $A_{ij}$ of a query and a key is calculated as follows 
 
 $$
-A_{ij} = {exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}}) \over \sum\limits_{j= 0}^{N} exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}})}
+A_{ij} = {exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}}) \over \sum\limits_{j= 0}^{N-1} exp(\boldsymbol{Q_i} \cdot \boldsymbol{K_j} / \sqrt{d_{model}})}
 $$
 
 <div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attentional span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys, an analgous situation would be calculating "the weight of a test on the final grade") strengthening this "limited attentional span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
