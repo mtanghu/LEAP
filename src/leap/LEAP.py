@@ -7,13 +7,20 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 class MultiheadLeap(nn.Module):
-    def __init__(self, hidden_size, n_heads, window_size, rescale = 8, dropout = .1):
+    def __init__(self, hidden_size, n_heads, window_size, rescale = None, dropout = .1):
         super(MultiheadLeap, self).__init__()
         self.n_heads = n_heads
         self.hidden_size = hidden_size
         self.head_size = hidden_size // n_heads
         self.window_size = window_size
-        self.rescale_value = 8
+        
+        if rescale is not None:
+            self.rescale = True
+            self.scaling_factor = (1 / self.head_size) * rescale
+        else:
+            # use normal scaling factor
+            self.rescale = False
+            self.scaling_factor = (1 / self.head_size**.5)
 
         self.drop = nn.Dropout(dropout)
 
@@ -27,9 +34,12 @@ class MultiheadLeap(nn.Module):
         f2 = f2.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
-        # normalize focus vectors so focus scores don't explode
-        f1 = self.__real_norm(f1)
-        f2 = self.__real_norm(f2)
+        # normalize vectors so dot products don't get too big
+        if self.rescale:
+            q = self.__real_norm(q)
+            f1 = self.__real_norm(f1)
+            f2 = self.__real_norm(f2)
+            v = self.__real_norm(v)
         
         # apply dropout to regularize focus scores (only dropout on one is fine because of the dot product)
         f1 = self.drop(f1)
@@ -37,8 +47,8 @@ class MultiheadLeap(nn.Module):
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
         focus_scores = (f1 * f2).sum(dim = -1)
         
-        # strong scaling
-        focus_scores = (focus_scores / self.head_size) * self.rescale_value
+        # scaling
+        focus_scores = focus_scores * self.scaling_factor
         
         # masking out pad tokens
         if attention_mask is not None:
@@ -54,14 +64,14 @@ class MultiheadLeap(nn.Module):
         z = torch.cumsum(focus_scores, dim = 1)
         z = z - self.__window_align(z)
         
-        # finish off manual softmax by dividing by normalization term z
-        focused_v = s / z
+        # finish off manual softmax by dividing by normalization term z (with numerical stability term)
+        focused_v = s / (z + 1e-5)
         
         # regularize to stop queries/alignment from overfitting and overfitting reliance on sequence information
         focused_v = self.drop(focused_v)
         
-        # querying by measuring dot product alignment (normal scaling is fine here)
-        alignment = torch.sigmoid((q * focused_v).sum(dim = -1) / self.head_size**.5)
+        # querying by measuring dot product alignment (with scaling)
+        alignment = torch.sigmoid((q * focused_v).sum(dim = -1) * self.scaling_factor)
         focused_v = alignment.unsqueeze(-1) * focused_v
         
         # concat heads
@@ -85,8 +95,8 @@ class MultiheadLeap(nn.Module):
         clone_x = torch.roll(clone_x, self.window_size, dims = 1)
         
         return clone_x
-
-
+    
+    
 
 class LeapBlock(nn.Module):
     def __init__(self, config, window_size):
@@ -98,7 +108,7 @@ class LeapBlock(nn.Module):
         # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
         self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
         self.leap = MultiheadLeap(config.hidden_size, config.n_heads, window_size,
-                                  rescale = config.rescale_value, dropout = config.hidden_dropout_prob)
+                                  rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
         self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
@@ -177,7 +187,7 @@ class LeapConfig(PretrainedConfig):
     model_type = "LeapForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, rescale_value = 8, hidden_dropout_prob = .1,
+                 n_layer = 4, rescale = 8, hidden_dropout_prob = .1,
                  initializer_range = .02):
         
         # check head sizes
@@ -202,7 +212,7 @@ class LeapConfig(PretrainedConfig):
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
-            n_layer = n_layer, rescale_value = rescale_value, hidden_dropout_prob = hidden_dropout_prob,
+            n_layer = n_layer, rescale = rescale, hidden_dropout_prob = hidden_dropout_prob,
             initializer_range = initializer_range
         )
 
