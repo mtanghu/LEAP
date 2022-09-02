@@ -1,9 +1,8 @@
-
 # Additive Attention Is All You Need?
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
 
-This README will show a new *strongly* scaled dot-product which should be of independent interest to Softmax-based Attention as a whole, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
+This README will show a new rescaled dot-product which should be of independent interest to Softmax-based Attention as a whole, then move on to show annotated Additive Attention mathematics, a unique linearization process/math (which allows for an RNN formulation), show how this approach can be used for linear local attention, as well as preliminary results which show that Additive Attention (when local attention is used) is potentially comparable to full attention.
 
 The code at `fastformer.py` in this folder is annotated with how the equations from the paper and this repo relate to code and should be easy to read (the relevant class would be `FastSelfAttention` at the top of the code).
 
@@ -90,18 +89,18 @@ $$\boldsymbol{x}\ \bar{\cdot}\ \boldsymbol{y} = \left({ \boldsymbol{x} - E[\bold
 
 This project considers the Additive Attentional mechanism described in [Wu et al. 2021](https://arxiv.org/pdf/2108.09084.pdf) to only be just the following equations (as all the other equations/steps do not apply to the sequence dimension):
 
-- <div></div>Consider a sequence of embeddings $\boldsymbol{x_{i}}$ with $i$ from 1 to N
+- <div></div>Consider a sequence of embeddings $\boldsymbol{x_{i}}$ with $i$ from 0 to N-1 (for N tokens)
 
 - <div></div>Get an “attention weight” $\alpha_{i}$ (which is just a scalar) for each embedding by projecting the embedding to a single dimension that will be scaled and softmax-ed over the sequence dimension, i.e.
 
 $$
-	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_{i}}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_{j}})}
+	(1)\ \alpha_i =  {exp(\boldsymbol{w}^T \boldsymbol{x_{i}}) \over \sum\limits_{j=0}^{N-1} exp(\boldsymbol{w}^T \boldsymbol{x_{j}})}
 $$
 
 - <div></div>Multiply the embeddings by their “attention weight” (so important embeddings are emphasized over unimportant embeddings which are pushed toward 0, note how this offers "explainability"), and sum over the sequence dimension to get a “global attention vector” ${\boldsymbol{g}}$ that contains information about the entire sequence, i.e.
 
 $$ 
-	(2)\ \boldsymbol{g} = \sum_{i=1}^{N} \alpha_{i} \boldsymbol{x_i}
+	(2)\ \boldsymbol{g} = \sum_{i=0}^{N-1} \alpha_{i} \boldsymbol{x_i}
 $$
 
 <div></div>Which is clearly $O(N)$ or linear in time complexity w.r.t the sequence length $N$. Note that this is also $O(1)$ in path length in the same way full attention is $O(1)$ path length as any token $\boldsymbol{x_{i}}$ can directly confer information to ${\boldsymbol{g}}$ without having to go through other tokens (and just like full attention, this is aided by the softmax which will clear away unimportant tokens by down weighting them). Note that the original paper uses a scaling term, however we address that in the Rescaled Dot Product section where we will not use the normal dot-product scaling.
@@ -115,21 +114,21 @@ Causal Language Modeling or decoder-based language modeling is where a language 
 - To do this rigorously, let's start by substituting equation (1) into equation (2)
 
 $$
-	(3)\ \boldsymbol{g} = \sum\limits_{\ell=1}^{N}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=1}^{N} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
+	(3)\ \boldsymbol{g} = \sum\limits_{\ell=0}^{N-1}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=0}^{N-1} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
 $$
 
 
 - <div></div>Now let us instead create $\boldsymbol{g_{i}}$, which would be the equivalent global attention vector for sequence information up to (and including) token $i$. This gives us:
 
 $$
-	(4)\ \boldsymbol{g_i} = \sum\limits_{\ell=1}^{i}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
+	(4)\ \boldsymbol{g_i} = \sum\limits_{\ell=0}^{i}  {exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) \over \sum\limits_{j=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_j})}*\boldsymbol{x_\ell}
 $$
 
 
 - <div></div>Though we may have a time complexity issue. The original Additive Attention mechanism shown in equation (3) takes $O(N)$ time, so recalculating it for every token $i$ as equation (4) might suggest would yield a $O(N^2)$ time complexity. Furthermore, because of the nested summation in equation (4) it may seem impossible to reuse previous calculations to get a linear time complexity. However, in a style reminiscent of [Transformers are RNNs](https://arxiv.org/pdf/2006.16236.pdf) by Katharpoulos et al. (2020) we can rewrite equation 4 by factoring out the denominator, i.e.
 
 $$
-	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=1}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=1}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell})}
+	(5)\ \boldsymbol{g_i} =  {\sum\limits_{\ell=0}^{i}exp(\boldsymbol{w}^T \boldsymbol{x_\ell}) *\boldsymbol{x_\ell} \over \sum\limits_{\ell=0}^{i} exp(\boldsymbol{w}^T \boldsymbol{x_\ell})}
 $$
 
 - <div></div>Where the summation terms in the numerator and denominator for each $i$ can be calculated simply by cumulative sum. To elaborate on this and the linear complexity, we can write this as a kind of RNN as Katharpoulos et al. (2020) did.
