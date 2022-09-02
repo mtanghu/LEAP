@@ -214,9 +214,9 @@ Because this is a causal language model the code is structured like one and impl
 - Dropout of .1 on embeddings, feedforward layers, and this project applies dropout after each usage of Additive Attention (to mimic attention dropout) just like GPT2
 - Learned positional embeddings ([GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2, though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) we considered, but decided against because it would unfairly give an advantage to the model when compared against normal transformers/gpt2 which uses learned absolute positional embeddings
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by GPT2
-- Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
+- Label smoothing ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762)) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
 - Attention masking of pad tokens ([Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
-- <div></div>Multihead Attention is implemented where the head size is $d_{model} \over n_{heads}$ with the same number of parameters as a single-head just like [Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762) which is carried over to GPT2
+- <div></div>Multihead Attention where the head size is $d_{model} \over n_{heads}$ with the same number of parameters as a single-head also as per Attention is All you Need by Viswani et al. (2017) which is carried over to GPT2
 
 ## Results
 
