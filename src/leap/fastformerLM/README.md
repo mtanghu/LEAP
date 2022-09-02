@@ -1,3 +1,4 @@
+
 # Additive Attention Is All You Need?
 
 In this section, we adapt Additive Attention first introduced in [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) specifically for causal language modeling. This was the early inspiration for LEAP where most of the linearization math/positive aspects of the model come from here (as such the READMEs for both are similar).
@@ -66,7 +67,7 @@ $$
 
 ### What is the issue?
 
-</br><div></div>While the reason provided for scaling by the original paper/authors is valid and makes sense, it only considers where $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are "random and normal". In fact, as training happens and parameters are updated through optimization/gradient descent, we can be more and more assured that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ will be neither be random nor normal!
+<div></div>While the reason provided for scaling by the original paper/authors is valid and makes sense, it only considers where $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ are "random and normal". In fact, as training happens and parameters are updated through optimization/gradient descent, we can be more and more assured that $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ will be neither be random nor normal!
 
 - <div></div>On the matter of normality , even if LayerNorm is used to normalize the embedding vector $\boldsymbol{x_i}$ before be transformed into $\boldsymbol{Q_i} = W_q \boldsymbol{x_i}$ and $\boldsymbol{K_j} = W_k \boldsymbol{x_i}$, the weight matrices $W_q$ and $W_k$ will be learned to make $\boldsymbol{Q_i}$ and $\boldsymbol{K_j}$ not normal (there are good reasons for why this would happen, like a particular $\boldsymbol{K_j}$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence)
 -  <div></div>On the matter of randomness, there is an especially problematic scenario when $\boldsymbol{Q_i} == \boldsymbol{K_j}$ which is very likely to happen when there is highly deterministic token interactions where a token would need to strongly pay attention to another token (like verb conjugation or subject-verb agreement where there is only one right answer). Even if we assume normality, it is easy to show that this case will cause the dot-product of $\boldsymbol{Q_i}$ with $\boldsymbol{K_j}$ to have mean of $d_{model}$ (!!) (because $\boldsymbol{Q_i} \cdot \boldsymbol{K_j} = \sum\limits_{z=0}^{d_{model-1}} r_z^2$ where $r$ is a random normal variable which would likewise have mean of 1, also consider the case that $\boldsymbol{Q_i} == -\boldsymbol{K_j}$ when the there should be no alignment).
@@ -203,7 +204,7 @@ Note that this should be doable with [Transformers are RNNs](https://arxiv.org/p
 
 ## Minor implementation details
 
-<div></div>A numerical stability term should added to the denominator of equations denominators of these equations in case the denominator gets very close to 0. Also to reiterate, recaled dot-products are used in place of the down projection, so instead of $\boldsymbol{w}^T \boldsymbol{x_i}$ (i.e. the down projection) we instead use $\boldsymbol{w}\ \bar{\cdot}\ \boldsymbol{x_i}$ where the definition of  " $\ \bar{\cdot}\ $ " can be found in the Rescaled Dot-Product section. 
+<div></div>A numerical stability term should added to the denominator of equations denominators of these equations in case the denominator gets very close to 0 (including the normalizing equations of the rescaled dot-product). Also to reiterate, recaled dot-products are used in place of the down projection (which is the same operation as a dot-product), so instead of $\boldsymbol{w}^T \boldsymbol{x_i}$ (i.e. the down projection) we instead use $\boldsymbol{w}\ \bar{\cdot}\ \boldsymbol{x_i}$ where the definition of  " $\bar{\cdot}$ " can be found in the Rescaled Dot-Product section. 
 
 ## Model Structure
 
