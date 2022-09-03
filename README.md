@@ -59,8 +59,9 @@ trainer.train()
 ```
 A more complete training example with a dataset, tokenization, and evaluations can be found at ``FastLM.ipynb`` in this repository which can be run with only 6GB of VRAM (GPU memory).
 
-### Development
- If you want to contribute, (optionally) make/address a github issue, or just send in a pull request! Use these installation instructions so that you'll have the latest repo and your edits will be reflected when you run the code
+### Development and Contributing
+
+This project needs help! If you want to contribute, (optionally) make/address a github issue, or just send in a pull request! There will likely be a paper published for this where all contributors will be named, please state your interest in this! Use these installation instructions so that you'll have the latest repo and your edits will be reflected when you run the code
 
 ```bash
 git clone https://github.com/mtanghu/LEAP.git
