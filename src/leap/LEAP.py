@@ -236,7 +236,7 @@ class LeapForCausalLM(PreTrainedModel):
         self.apply(self._init_weights)
 
 
-    def forward(self, input_ids, attention_mask = None, labels = None, **kwargs):
+    def forward(self, input_ids, attention_mask = None, labels = None, return_dict = False, **kwargs):
         if attention_mask is None:
             attention_mask = torch.ones(input_ids.shape)
 
@@ -257,6 +257,10 @@ class LeapForCausalLM(PreTrainedModel):
             shift_labels = labels[..., 1:].contiguous()
             
             loss = self.criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            
+        if return_dict is True:
+            print("returning")
+            return {"loss": loss, "logits": logits}
 
         return CausalLMOutput(loss = loss, logits = logits)
 
