@@ -1,6 +1,6 @@
 # Linear Explainable Attention in Parallel (LEAP)
 
-This project implements a novel linear attention mechanism based on the "softmax-weighted cumulative sum" which has suprisingly favorable properties in computational complexity, explainability, and theoretical expressiveness. This project strongly believes that this linear attention mechanism can replace full attention with virtually no tradeoffs, if not actually having even better performance (because it's a more simple attention mechanism). This was originally inspired by adapting [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) (where they don't use any kind of cumulative sum)  for causal language modeling which we also implement with documentation and a comprehensive README that can be found in `src/leap/fastformerLM`. 
+This project implements a novel linear attention mechanism based on "softmax-weighted cumulative sums" which has surprisingly favorable properties in computational complexity, explainability, and theoretical expressiveness. This project strongly believes that this linear attention mechanism can replace full attention with virtually no tradeoffs, if not actually having even better performance (because it's a more simple attention mechanism). This was originally inspired by adapting [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) (where they don't use any kind of cumulative sum)  for causal language modeling which we also implement with documentation and a comprehensive README that can be found in `src/leap/fastformerLM`. 
 
 Reasons why LEAP may be able to replace full attention:
 
@@ -10,7 +10,7 @@ Reasons why LEAP may be able to replace full attention:
 
 3. **Linear in time local attention**, this concept has not been seen before in the literature as local attention typically has to scale in time complexity with the size of the local window. This project uses some simple mathematics and reuse of computations to get around this (and still be parallelizeable). This gets around the issue that longer sequences will typically need bigger local attention windows, but also builds upon the suprising strength of local + global attention (previously explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) and [BigBird](https://arxiv.org/abs/2007.14062) with the addition of random attention) with added mid-range sequence modeling. This project contends that this will give enough representational complexity to match full attention
 
-4. **Built-in Explainability**, while explainability is not supported yet in this project, as we'll see later, each token will be assigned an "focus weight" (which is softmaxed over the sequence) which can be used to explain what tokens the model is paying attention to, and which tokens are ignored similar to the explainability offered by the original [Attention is All you Need](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) paper, though more simplified
+4. **Built-in Explainability**, while explainability is not supported yet in this project, each token will be assigned an "focus weight" (which is softmaxed over the sequence) that can be used to explain what tokens the model is paying attention to, and which tokens are ignored. This is similar to the explainability offered by the original [Attention is All you Need](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) paper, though more simplified
 
 5. **O(1) Path Length/Flexibility**, A great strength of full attention Transformers is the flexibility provided by the $O(1)$ path length. An example where many linear attention mechanisms would likely fail (ie. if they only use local/convolutional attention or time-decaying factors or a recurrent vector that will get overloaded with information over time) would be when there is "*task metadata*" at the beginning of the sequence. Example: "Read the following story paying special attention to how Alice treats Bob as you will write an essay on this after: \<very long story here\>". This task information may not make it all the way through the story and writing the essay with the previously mentioned approaches, but with this project's approach, tokens from the beginning of the sequence can directly transfer information to tokens at the end of the sequence with a $O(1)$ path length (like full-attention) through global LEAP
 
@@ -18,7 +18,7 @@ Reasons why LEAP may be able to replace full attention:
 
 This README will describe a rescaled dot-product which may be of independent interest to full attention, summarize LEAP mathematics, and then show preliminary results which show that LEAP is potentially comparable to full attention, and there is plenty of room for development!
 
-## Usage & Development
+## Usage
 
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/))
 
@@ -61,7 +61,7 @@ A more complete training example with a dataset, tokenization, and evaluations c
 
 ### Development and Contributing
 
-This project needs help! If you want to contribute, (optionally) make/address a github issue, or just send in a pull request! There will likely be a paper published for this where all contributors will be named, please state your interest in this! Use these installation instructions so that you'll have the latest repo and your edits will be reflected when you run the code
+This project needs your help! If you want to contribute, (optionally) make/address a github issue, or just send in a pull request! There will likely be a paper published for this where all contributors will be named, so please state your interested in this! Use these installation instructions so that you will have the latest repo and your edits will be reflected when you run the code
 
 ```bash
 git clone https://github.com/mtanghu/LEAP.git
@@ -72,7 +72,7 @@ pip install -e .
 
 ## Rescaled Dot-Product
 
-This project encounted some training instability where some preliminary investigation found that the attention/focus scores that were being generated were absurdly large/small. This may be of independent interest to training instability in large language models (say in [Megatron](https://arxiv.org/abs/1909.08053) or [PALM](https://arxiv.org/abs/2204.02311)) as the arguments shown in this section may offer a reasonable explaination for why there is training instability particularly in large models.
+This project encounted some training instability where some preliminary investigation found that the attention/focus scores that were being generated were absurdly large/small. This may be of independent interest to training instability in large language models (say in [Megatron](https://arxiv.org/abs/1909.08053) or [PALM](https://arxiv.org/abs/2204.02311)) as the arguments shown in this section may offer a reasonable explanation for why there is training instability particularly in large models.
 
 ### Normal Scaled Dot-Product Attention 
 
