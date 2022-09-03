@@ -25,7 +25,7 @@ setup(
     long_description_content_type='text/markdown',
     keywords='linear transformer NLP deep learning pytorch',
     install_requires=[
-        'transformers[torch]',
+        'transformers',
         'datasets',
         'pandas',
         'numpy',
