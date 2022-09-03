@@ -11,7 +11,7 @@ description.insert(3, '')
 
 setup(
     name='leap-transformer',
-    version='0.1.2',
+    version='0.1.4',
     license='CC0 1.0 Universal',
     author='Michael Hu',
     author_email='prmhu@yahoo.com',
@@ -25,7 +25,6 @@ setup(
     long_description_content_type='text/markdown',
     keywords='linear transformer NLP deep learning pytorch',
     install_requires=[
-        'torch>=1.0.0',
         'transformers[torch]',
         'datasets',
         'pandas',
