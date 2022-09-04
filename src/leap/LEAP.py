@@ -238,10 +238,10 @@ class LeapForCausalLM(PreTrainedModel):
 
     def forward(self, input_ids, attention_mask = None, labels = None, return_dict = False, **kwargs):
         if attention_mask is None:
-            attention_mask = torch.ones(input_ids.shape)
+            attention_mask = torch.ones(input_ids.shape).to(input_ids.device)
 
         attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
-        attention_mask = (1.0 - attention_mask) * -10000.0
+        attention_mask = (1.0 - attention_mask) * -100.0
         attention_mask = attention_mask.unsqueeze(-1)
         
         embds = self.word_embedding(input_ids)
