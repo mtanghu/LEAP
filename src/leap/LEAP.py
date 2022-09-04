@@ -187,7 +187,7 @@ class LeapConfig(PretrainedConfig):
     model_type = "LeapForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, rescale = 8, hidden_dropout_prob = .1,
+                 n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
                  initializer_range = .02):
         
         # check head sizes

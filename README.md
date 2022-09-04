@@ -40,7 +40,7 @@ config = LeapConfig(
     n_heads = 4, # number of heads to use in multi-head attention
     initializer_range = .02, # standard deviation for weight initialization
     hidden_dropout_prob = .1, # dropout value used for embeddings, attention, and feedforward layers
-    rescale = 15 # what to rescale the focus values with, set lower if you have unstable/NaN loss
+    rescale = 10 # what to rescale the focus values with, set lower if you have unstable/NaN loss
 )
 
 model = LeapForCausalLM(config)
