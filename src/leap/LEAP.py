@@ -25,76 +25,82 @@ class MultiheadLeap(nn.Module):
         self.drop = nn.Dropout(dropout)
 
 
-    def forward(self, q, f1, f2, v, attention_mask = None):        
+    def forward(self, q, f, k, v, attention_mask = None):        
         batch_size, seq_len, hidden_size = v.shape
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        f1 = f1.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        f2 = f2.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        f = f.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
         # normalize vectors so dot products don't get too big
         if self.rescale:
             q = self.__real_norm(q)
-            f1 = self.__real_norm(f1)
-            f2 = self.__real_norm(f2)
-            v = self.__real_norm(v)
+            f = self.__real_norm(f)
+            k = self.__real_norm(k)
         
-        # apply dropout to regularize focus scores (only dropout on one is fine because of the dot product)
-        f1 = self.drop(f1)
+        # apply dropout to regularize focus logits
+        f = self.drop(f)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
-        focus_scores = (f1 * f2).sum(dim = -1)
+        focus_logits = (f * k).sum(dim = -1)
         
         # scaling
-        focus_scores = focus_scores * self.scaling_factor
+        focus_logits = focus_logits * self.scaling_factor
         
         # masking out pad tokens
         if attention_mask is not None:
-            focus_scores += attention_mask
+            focus_logits += attention_mask
         
         # manual softmax within cumulative sum
-        focus_scores = torch.exp(focus_scores)
-        focus_scores = focus_scores.unsqueeze(-1)
+        focus_weights = torch.exp(focus_logits)
+        focus_weights = focus_weights.unsqueeze(-1)
         
-        # windowed cumsum 
-        s = torch.cumsum(focus_scores * v, dim = 1)
-        s = s - self.__window_align(s)
-        z = torch.cumsum(focus_scores, dim = 1)
-        z = z - self.__window_align(z)
+        # normalization term for softmax
+        cumulative_weights = torch.cumsum(focus_weights, dim = 1)
+        cumulative_weights = cumulative_weights - self.__window_align(cumulative_weights)
         
-        # finish off manual softmax by dividing by normalization term z (with numerical stability term)
-        focused_v = s / (z + 1e-5)
+        focused_k = self.__w_focus(focus_weights, cumulative_weights, k)
+        focused_v = self.__w_focus(focus_weights, cumulative_weights, v)
         
         # regularize to stop queries/alignment from overfitting and overfitting reliance on sequence information
+        q = self.drop(q)
         focused_v = self.drop(focused_v)
         
         # querying by measuring dot product alignment (with scaling)
-        alignment = torch.sigmoid((q * focused_v).sum(dim = -1) * self.scaling_factor)
-        focused_v = alignment.unsqueeze(-1) * focused_v
+        alignment = torch.sigmoid((q * focused_k).sum(dim = -1) * self.scaling_factor)
+        attention = alignment.unsqueeze(-1) * focused_v
         
         # concat heads
-        focused_v = focused_v.reshape(batch_size, seq_len, hidden_size)
+        attention = focused_v.reshape(batch_size, seq_len, hidden_size)
         
-        return focused_v
+        return attention
 
 
-    def __real_norm(self, x):
+    def __real_norm(self, mod):
         # normalize x on the last dimension (the head dimension in this case) with eps term for stability
-        return (x - x.mean(dim = -1).unsqueeze(-1)) / (x.std(dim = -1).unsqueeze(-1) + 1e-5)
+        return (mod - mod.mean(dim = -1).unsqueeze(-1)) / (mod.std(dim = -1).unsqueeze(-1) + 1e-5)
 
 
-    def __window_align(self, x):
-        seq_len = x.shape[1]
+    def __w_focus(self, focus_weights, cumulative_weights, mod):
+        # pass cumulative weights so they don't have to be recalculated
+        weighted_mod = torch.cumsum(focus_weights * mod, dim = 1)
+        weighted_mod = weighted_mod - self.__window_align(weighted_mod)
         
+        # finish softmax by dividing by weight totals (with numerical stability term)
+        focused_mod = weighted_mod / (cumulative_weights + 1e-5)
+        return focused_mod
+
+
+    def __window_align(self, mod):
         # zero out the last window_size vectors, and roll these vectors to the front
         # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
-        clone_x = torch.clone(x)
-        clone_x[:,-self.window_size:] = 0
-        clone_x = torch.roll(clone_x, self.window_size, dims = 1)
+        clone_mod = torch.clone(mod) # clone keeps gradients
+        clone_mod[:,-self.window_size:] = 0
+        clone_mod = torch.roll(clone_mod, self.window_size, dims = 1)
         
-        return clone_x
+        return clone_mod
     
     
 
@@ -111,9 +117,9 @@ class LeapBlock(nn.Module):
                                   rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
-        self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
+        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4, bias = False)
         self.activation = nn.GELU()
-        self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size, bias = False)
+        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size, bias = False)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
@@ -123,10 +129,10 @@ class LeapBlock(nn.Module):
         mod_normed = self.pre_norm(mod)
         
         # projections so each matrix has its own purpose
-        queries, focus1, focus2, values = self.projections(mod_normed).chunk(4, dim = -1)
+        q, f, k, v = self.projections(mod_normed).chunk(4, dim = -1)
         
         # unnormed residual connection
-        mod = mod + self.leap(queries, focus1, focus2, values, attention_mask)
+        mod = mod + self.leap(q, f, k, v, attention_mask)
         
         # feedforward layer with pre-norming
         mod_normed = self.pre_norm(mod)
