@@ -206,7 +206,8 @@ class LeapConfig(PretrainedConfig):
         elif use_local_att is True and window_sizes is None:
             window_sizes = [4 * (2**i) for i in range(n_layer)]
             
-            # last layer should still be global attention
+            # first & last layer should be global attention
+            window_sizes[0] = n_positions
             window_sizes[-1] = n_positions
         else:
             # don't use windows, i.e. windows are global size
