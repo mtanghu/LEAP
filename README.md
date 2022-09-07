@@ -20,7 +20,7 @@ This README will describe a rescaled dot-product which may be of independent int
 
 ## Usage
 
-Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/))
+Use the package manager [pip](https://pip.pypa.io/en/stable/) to install (make sure you have [pytorch installed with CUDA](https://pytorch.org/get-started/locally/) as a prerequisite)
 
 ```bash
 pip install leap-transformer
@@ -82,7 +82,7 @@ $$
 A_{ij} = {exp(Q_i \cdot K_j / \sqrt{d_{model}}) \over \sum\limits_{j= 0}^{N} exp(Q_i \cdot K_j / \sqrt{d_{model}})}
 $$
 
-<div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attentional span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys) strengthening this "limited attentional span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
+<div></div>To break this down, we simply measure the "similarity" of Query vector $i$ with Key vector $j$ (measured through dot product), then scale by a factor of $1 \over \sqrt{d_{model}}$ (we will get back to this). To ensure a "limited attention span" we apply a softmax (i.e. dividing the similarity score of Query $i$ with Key $j$ by that Query's similarities with all the other Keys) strengthening this "limited attention span" effect with exponentiation where a strong/high similarity between Query $i$ and Key $j$ will get exploded to a very large number and very negative similarity scores will mapped to an exponentially small number.
 
 ### Why scale by $1 \over \sqrt{d_{model}}$?
 
@@ -94,7 +94,7 @@ $$
 </br>
 </br>
 
-- <div></div>On the matter of normality , even if LayerNorm is used to normalize the embedding vector $x_i$ before be transformed into $Q_i = W_q \boldsymbol{x_i}$ and $K_j = W_k \boldsymbol{x_i}$, these projections are likely not going to be normal after even mild training. For example, a particular $K_j$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence, thus maximizing its dot products with query vectors and violating normality
+- <div></div>On the matter of normality, even if LayerNorm is used to normalize the embedding vector $x_i$ before be transformed into $Q_i = W_q \boldsymbol{x_i}$ and $K_j = W_k \boldsymbol{x_i}$, these projections are likely not going to be normal after even mild training. For example, a particular $K_j$ vector may be learned to become especially large if the token it represents is particularly "important" for the entire sequence, thus maximizing its dot products with query vectors and violating normality
 
 -  <div></div>On the matter of randomness, there is an especially problematic scenario when $Q_i == K_j$. This is another realistic scenario when there are highly deterministic token interactions like verb conjugation or subject-verb agreement where there is only one right answer and a token only needs to pay attention to one and only one previous token. Even if we assume normality, it is easy to show that this case will cause the dot-product of $Q_i$ with $K_j$ to have mean of $d_{model}$ (!!) (because $Q_i \cdot K_j = \sum\limits_{z=0}^{d_{model-1}} r_z^2$ where $r$ is a random normal variable which would likewise have mean of 1, also consider the case that $Q_i == -K_j$ when the there should be no alignment)
 
@@ -106,23 +106,23 @@ $$
 
 $${\textit{Norm}(\boldsymbol{x}) \cdot \textit{Norm}(\boldsymbol{y}) \over d_{model} / c} = \left({ \boldsymbol{x} - E[\boldsymbol{x}] \over \sqrt{Var[\boldsymbol{x}]}} \cdot  {\boldsymbol{y} - E[\boldsymbol{y}] \over \sqrt{Var[\boldsymbol{y}]} }\right) *{c \over d_{model}}$$
 
-<div></div>This enforces that even if $\boldsymbol{x} ==\boldsymbol{y}$, after normalization, their dot product will have mean $d_{model}$, which we divide by to bring the mean back to 1. Then, to allow for larger dot-product similarity values, we multiply by the set constant $c$ (15 seems to work well and, after exponentiation in the softmax, e^15 should be larger than what anyone would reasonably need) to rescale the the size of the dot-product. Thus, this "recaled dot-product" will not produce larger dot product similarities when $d_{model}$ is larger. As a slight tangent, it should be recognized that LayerNorm/normalizing a vector does not make the vector a "normal" vector (where each element is drawn from the normal distribution). This doesn't seem to be a problem emperically though. This project will work on concrete experments to show this as well as the value of this technique in the future, however preliminary measurements find that this still keeps attention sparse (in fact the pre-softmax dot product similarities quickly approach 15 within the first few steps of training) and does effectively limit the maximum value for this dot product (only a max value of ~16 was ever found).
+<div></div>This enforces that even if $\boldsymbol{x} ==\boldsymbol{y}$, after normalization, their dot product will have mean $d_{model}$, which we divide by to bring the mean back to 1. Then, to allow for larger dot-product similarity values, we multiply by the set constant $c$ (15 seems to work well and, after exponentiation in the softmax, e^15 should be larger than what anyone would reasonably need) to rescale the the size of the dot-product. Thus, this "recaled dot-product" will not produce larger dot product similarities when $d_{model}$ is larger. As a slight tangent, it should be recognized that LayerNorm/normalizing a vector does not make the vector a "normal" vector (where each element is drawn from the normal distribution). This doesn't seem to be a problem empirically though. This project will work on concrete experiments to show this as well as the value of this technique in the future, however preliminary measurements find that this still keeps attention sparse (in fact the pre-softmax dot product similarities quickly approach 15 within the first few steps of training) and does effectively limit the maximum value for this dot product (only a max value of ~16 was ever found).
 
 ## Linear Explainable Attention in Parallel (LEAP) Math
 
-LEAP is meant to replace the scaled dot-product Attention module. The principle concept of LEAP is that sequence information will be conferred between tokens using a "weighted cumulative sum". Cumulative sums are parallelizeable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html) (they claim that the primary operation for cumsum/prefix sum "typically proceeds at 'memcpy' speeds"), and of course cumulative sums are linear in complexity. The "softmax-weighting" is to maintain a kind of "Attention" where there can still be O(1) path length and also offers explainability (as we can see what tokens the model is paying attention to). We will present the equations and ideas in steps to try to motivate and explain an interpretation for LEAP.
+LEAP is meant to replace the scaled dot-product Attention module. The principle concept of LEAP is that sequence information will be conferred between tokens using a "weighted cumulative sum" that represents what tokens the model is "focusing on". Cumulative sums are parallelizeable as explained by [this wikipedia on prefix sum aka cumulative sum](https://en.wikipedia.org/wiki/Prefix_sum#Algorithm_1:_Shorter_span,_more_parallel) which is implemented with CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html) (they claim that the primary operation for cumsum/prefix sum "typically proceeds at 'memcpy' speeds"), and of course cumulative sums are linear in complexity. The "softmax-weighting" is to maintain a kind of "Attention" where there can still be O(1) path length and also offers explainability (as we can see what tokens the model is paying attention to). We will present the equations and ideas in steps to try to motivate and explain an interpretation for LEAP.
 
 ### Focus weighting
 
-.<div></div>Normal full attention is pairwise between all tokens (thus giving quadratic complexity) allowing all tokens to attend to each other. However to make a biological plausibility argument, a human would likely not read/predict a token in a sequence by considering that token's interactions with all other tokens (and humans seem to do just fine with sequence information). More realistically, a human would have a more "focused" kind of attention where their focus is drawn to specific important aspects of the sequence which they will use to make sense of reading/predicting the next token. 
+Normal full attention is pairwise between all tokens (thus giving quadratic complexity) allowing all tokens to attend to each other. However to make a biological plausibility argument, a human would likely not read/predict a token in a sequence by considering that token's interactions with all other tokens (and humans seem to do just fine with sequence information). More realistically, a human would have a more "focused" kind of attention where their focus is drawn to specific important aspects of the sequence which they will use to make sense of reading/predicting the next token. 
 
-.<div></div>To ground this in terms of token sequences, let $E$ by a matrix with where the rows are the token embeddings denoted $E_i$ for the $i$-th embedding vector. Then to implement "focus", let us consider a column vector of "focus weights" $f$ with $f_i$ signifying whether embedding $E_i$ should have high focus/attention (and thus have a big $f_i$) or low focus/attention (and thus have a small $f_i$. Let us define the "focus" (of a model) at position $i$ as the follow function:
+<div></div>To ground this in terms of token sequences, let $E$ by a matrix with where the rows are the token embeddings denoted $E_i$ for the $i$-th embedding vector. Then to implement "focus", let us consider a column vector of "focus weights" $f$ with $f_i$ signifying whether embedding $E_i$ should have high focus/attention (and thus have a big $f_i$) or low focus/attention (and thus have a small $f_i$. Let us define the "focus" (of a model) at position $i$ as the follow function:
 
 $$
 (1)\ \ \textit{Focus}(f, E)\_{i} = {\sum\limits_{j = 0}^{i}  f_j * E_j \over \sum\limits_{j=0}^i f_j}
 $$
 
-The idea is that at position $i$, the tokens that the models is "focusing on" can simply be represented as a weighted sum of the embeddings at each previous position $E_j$ weighted by the scalar focus weight $f_j$. Then to ensure a "limited focus" or a "limited attention span", we simply divide by the sum of these focus weights. Both the numerator and denominator summation terms can be calculated using cumulative sums so that we have have linear complextiy with performing the focus calculation on all $i$ (if this is confusing, just continue as the later sections may help show this idea in different ways). Note that if $f$ was calculated as the exponentiation of a "focus logits" vector $l$ (i.e. $f = exp(l)$) which we will do later, this would be a "softmax-weighted cumulative sum" as we can rewrite equation 1 with a softmax:
+<div></div>The idea is that at position $i$, the tokens that the models is "focusing on" can simply be represented as a weighted sum of the embeddings at each previous position $E_j$ weighted by the scalar focus weight $f_j$. Then to ensure a "limited focus" or a "limited attention span", we simply divide by the sum of these focus weights. Both the numerator and denominator summation terms can be calculated using cumulative sums so that we have have linear complextiy with performing the focus calculation on all $i$ (if this is confusing, just continue as the later sections may help show this idea in different ways). Note that if $f$ was calculated as the exponentiation of a "focus logits" vector $l$ (i.e. $f = exp(l)$) which we will do later, this would be a "softmax-weighted cumulative sum" as we can rewrite equation 1 with a softmax:
 
 $$
 \textit{causal-softmax}(i, l)_j =  {exp(l_j) \over \sum\limits_{j=0}^i exp(l_j)}
@@ -132,19 +132,19 @@ $$
 \textit{Focus}(f, E)\_{i} = {\sum\limits_{j = 0}^{i} \textit{causal-softmax}(i, l) _j* E_j}
 $$
 
-This concept of the $\textit{causal-softmax}$ is the primary innovation that is hidden away inside equation 1, but we will show here to elucidate why this concept may not have been explored before. Subsituting in the $\textit{causal-softmax}$ definition we see
+<div></div>This concept of the $\textit{causal-softmax}$ is the primary innovation that is hidden away inside equation 1, but we will show here to elucidate why this concept may not have been explored before. Subsituting in the $\textit{causal-softmax}$ definition we see
 
 $$
 \textit{Focus}(f, E)\_{i} = {\sum\limits_{j = 0}^{i} {exp(l_j) \over \sum\limits_{k=0}^i exp(l_k)}* E_j}
 $$
 
-which has a nested summation (note the limits in the denominator of the inner summation were changed from $j$ to $k$ as $j$ is already used in the limits of the outer summation). This nested summation presents a time complexity issue for calculation $\textit{Focus}(f, E)$ for all $i$ where even if we use a cumulative sum to calculate the inner summation in the denominator, the outer summation would still need to be recalculated for every $i$ thus yielding $O(N^2)$ or quadratic complexity for token sequence length of $N$. This can be rectified simply by applying the distributive property (to reuse previous computation) of summations to factor out the denominator.
+<div></div>which has a nested summation (note the limits in the denominator of the inner summation were changed from $j$ to $k$ since $j$ is already used in the limits of the outer summation). This nested summation presents a time complexity issue for calculation $\textit{Focus}(f, E)$ for all $i$ where even if we use a cumulative sum to calculate the inner summation in the denominator, the outer summation would still need to be recalculated for every $i$ thus yielding $O(N^2)$ or quadratic complexity for token sequence length of $N$. This can be rectified simply by applying the distributive property (to reuse previous computation) of summations to factor out the denominator.
 
 $$
 \textit{Focus}(f, E)\_{i} = {\sum\limits_{j = 0}^{i} {exp(l_j) \over \sum\limits_{k=0}^i exp(l_k)}* E_j} = {\sum\limits_{j = 0}^{i} exp(l_j)* E_j \over \sum\limits_{j=0}^i exp(l_j)} 
 $$
 
-where as stated before, both the numerator and denominator calculated using cumulative sums when performing the focus calculation on all $i$.
+<div></div>where as stated before, both the numerator and denominator calculated using cumulative sums when performing the focus calculation on all $i$.
 
 ### Local Attention/Windowing
 
@@ -187,19 +187,19 @@ K_i = \textit{Norm}(W_K\boldsymbol{x_i})\\
 V_i = W_V\boldsymbol{x_i}
 $$
 
-We apply norming to $Q, F, K$ as per the "Rescaled Dot-Product" section as they will be used in dot-products. The first example of this is when calculate the focus weights column vector $f$:
+We apply norming to $Q, F, K$ as per the "Rescaled Dot-Product" section as they will be used in dot-products. The first example of this is when we calculate the focus weights column vector $f$:
 
 $$
-f_i = {F_i \cdot K_i \over d_{model} / c}
+f_i = exp\left({F_i \cdot K_i \over d_{model} / c}\right)
 $$
 
-Where we can finally form the leap equation
+A "self dot-product" is used to calculate the focus weights so that this weight would be dynamic at runtime (potentially increasing flexibility just like normal dot-product attention). Now we can form the leap equation as follows
 
 $$
 (3)\ \ \textit{LEAP}_i = \sigma\left({Q_i \cdot \textit{w-Focus}(f, K)_i \over d_{model} / c}\right) * \textit{w-Focus}(f, V)_i
 $$
 
-where $\sigma$ is the sigmoid function and $LEAP$ is the output of attention vector. To offer an interpretation of all this equation: the Queries, Keys and Values have the same meaning as they do in full scaled dot-product attention, which is that a Query vector is what the token at index $i$ is "looking for", a Key vector is what 'kind' of information the token at index $i$ contains, and a Values vector is the information itself. At index $i$ the idea is to measure the (re-scaled) dot-product simliarity of what the token is "looking for" (the query) with the kind of token information the model focused on (the focused keys). If they the (re-scaled) dot-product simliarity is high (i.e. what the token is looking for matches what the 'kind' of infomation focused on) then the sigmoid will ouput a value close to 1 to allow the information the model focused on (the values) to output. On the other hand, if the (re-scaled) dot-product similarity is low, the sigmoid will output a value close to 0 to stop the values infomation focused on to be output. A prototypical example would be pronoun filling, Ex. "Alice gave Bob a toy, and he was very happy". The query for the "he" token would be to look for "a male subject or object" where one of the attention heads should focus on "Bob" and should likewise produce a keys vector that encodes "a male subject or object" where then the dot-product similarity should be high and allow the "Bob" encoded in the focused values to be output. To clarify about "attention heads", Multihead Attention is used and implemented just like normal scaled-dot-product attention where instead of just having a single set of Queries, Keys, and Values, instead we have multiple Queries, Keys, and Values vectors are generated for each token so that there can be "multiple focuses" (each head would have its own "focus"/attention).
+where $\sigma$ is the sigmoid function and $LEAP$ is the attention output. To offer an interpretation of this equation: the Queries, Keys and Values have the same meaning as they do in full scaled dot-product attention, which is that a Query vector is what the token at index $i$ is "looking for", a Key vector is what 'kind' of information the token at index $i$ contains, and a Values vector is the information itself. At index $i$ the idea is to measure the (re-scaled) dot-product similarity of what the token is "looking for" (the query) with the kind of token information the model focused on (the focused keys). If the (re-scaled) dot-product similarity is high (i.e. what the token is looking for matches what the 'kind' of information focused on) then the sigmoid will output a value close to 1 to allow the information the model focused on (the values) to output. On the other hand, if the (re-scaled) dot-product similarity is low, the sigmoid will output a value close to 0 to stop the values information focused on to be output. A prototypical example of the former case would be pronoun filling, Ex. "Alice gave Bob a toy, and he was very happy". The query for the "he" token would be to look for "a male subject or object" where one of the attention heads should focus on "Bob" and should likewise produce a keys vector that encodes "a male subject or object" where then the dot-product similarity should be high and allow the "Bob" encoded in the focused values to be output (thus making sense of the pronoun "he" as referring to Bob). To clarify about "attention heads", Multihead Attention is used and implemented just like normal scaled-dot-product attention where instead of just having a single set of Queries, Keys, and Values, instead we have multiple Queries, Keys, and Values vectors are generated for each token so that there can be "multiple focuses" (each head would have its own "focus"/attention).
 
 Note: all equations shown so far are only for one row vector at a time, though of course, in the implementation all the equations are applied to all rows in parallel using basic pytorch/CUDA tensor operations.
 
@@ -244,7 +244,7 @@ $$
 	(6)\ \ \boldsymbol{g_i} = \left({Q_i \cdot  {\boldsymbol{k_i} - \boldsymbol{k_i'} \over z_i -z_i'} \over d_{model}/c}\right) *{\boldsymbol{v_i} - \boldsymbol{v_i'} \over z_i -z_i'}
 $$
 
-<div></div>Short Discussion: The RNN formulation should only be used at inference time to provide O(1) time and space complexity for generating the next token. This is because when training, equation 4 can be implemented with parallel cumulative sums to calculate each of the summation terms for each token index $i$. Also, as a slight tangent, to calculate $\boldsymbol{s_{i+1}'}$ and $z_{i+1}'$ you will technically need to keep a buffer of the previous *tokens* and not their embeddings, as those can be recomputed "on the fly". This technically means you need $O(N)$ space but NOT $O(N*d_{model})$ "space". Though in general, this going to be a trivial matter since almost every sequence task will store all previous sequence tokens somewhere (like for text generation, all previously generated text will be stored). So if we only consider the amount of RAM/VRAM needed, it is still $O(1)$, as the buffer of previous tokens could be stored on disk and can be retrieved efficently with cached IO calls (without any special IO management).
+<div></div>Note: The RNN formulation should only be used at inference time to provide O(1) time and space complexity for generating the next token. This is because when training, equation 4 can be implemented with parallel cumulative sums to calculate each of the summation terms for each token index $i$. Also, as a slight tangent, to calculate $\boldsymbol{s_{i+1}'}$ and $z_{i+1}'$ you will technically need to keep a buffer of the previous *tokens* and not their embeddings, as those can be recomputed "on the fly". This technically means you need $O(N)$ space but NOT $O(N*d_{model})$ "space". Though in general, this going to be a trivial matter since almost every sequence task will store all previous sequence tokens somewhere (like for text generation, all previously generated text will be stored). So if we only consider the amount of RAM/VRAM needed, it is still $O(1)$, as the buffer of previous tokens could be stored on disk and can be retrieved efficiently with cached IO calls (without any special IO management).
 
 
 ### Numerical Stability
@@ -255,7 +255,7 @@ $$
 
 Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2 [paper for reference by Radford et al. (2019)](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf) where LEAP just replaces the scaled-dot product Attention module in a Transformer:
 
-- Pre-norming with a layernorm before projecting to logits like GPT2
+- Pre-norming with a layernorm before projecting to token logits like GPT2
 - Dropout of .1 on embeddings, feedforward, and attention layers like GPT2
 - Learned positional embeddings as per [GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2 (though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) were considered, but decided against because it would unfairly give an advantage to the model when compared against normal Transformers/gpt2 which uses learned absolute positional embeddings
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by Attention is All you Need, GPT1 and likewise GPT2
