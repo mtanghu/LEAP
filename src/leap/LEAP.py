@@ -43,11 +43,8 @@ class MultiheadLeap(nn.Module):
         # apply dropout to regularize focus logits
         f = self.drop(f)
 
-        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
-        focus_logits = (f * k).sum(dim = -1)
-        
-        # scaling
-        focus_logits = focus_logits * self.scaling_factor
+        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
+        focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
         
         # masking out pad tokens
         if attention_mask is not None:
@@ -166,11 +163,11 @@ class LeapDecoder(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, 
-                input_embs, 
-                attention_mask, 
-                pooler_index=0):
-
+    def forward(self, input_embs, attention_mask):
+        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
+        attention_mask = (1.0 - attention_mask) * -100.0
+        attention_mask = attention_mask.unsqueeze(-1)
+        
         batch_size, seq_length, _ = input_embs.shape
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_embs.device)
         position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
@@ -230,7 +227,7 @@ class LeapForCausalLM(PreTrainedModel):
     def __init__(self,config):
         super().__init__(config)
         self.config = config
-        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
+        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.leap_model = LeapDecoder(config)
         self.last_norm = nn.LayerNorm(config.hidden_size)
@@ -245,10 +242,6 @@ class LeapForCausalLM(PreTrainedModel):
     def forward(self, input_ids, attention_mask = None, labels = None, return_dict = False, **kwargs):
         if attention_mask is None:
             attention_mask = torch.ones(input_ids.shape).to(input_ids.device)
-
-        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
-        attention_mask = (1.0 - attention_mask) * -100.0
-        attention_mask = attention_mask.unsqueeze(-1)
         
         embds = self.word_embedding(input_ids)
         layer_outputs = self.leap_model(embds, attention_mask)
@@ -257,6 +250,9 @@ class LeapForCausalLM(PreTrainedModel):
         
         loss = None
         if labels is not None:
+            # set pad token labels to -100 to be ignored
+            labels.masked_fill_(attention_mask == 0, -100)
+            
             # shift logits the same gpt2 does at
             # https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
             shift_logits = logits[..., :-1, :].contiguous()
