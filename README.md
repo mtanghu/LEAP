@@ -174,7 +174,7 @@ $$
 }
 $$
 
-<div></div>As to the question of what $w$ to use, this project will use different $w$ at each layer which can be set as hyperparameters. The heuristic we will use based on preliminary testing is that $w_\ell = (2)^\ell$ for layer number $\ell$ starting at 0, though both the first and last layers will be reserved for global attention (i.e. $w_0 = N, w_{L-1} = 0$ where $L$ is the number of layers). This heuristic should work well enough for most applications, though in general these window sizes can easily be tuned using hyperparameter sweeps/bayesian optimization, or just using domain knowledge as to whether there is local structure that could be benefited from being modeled separately (which is certainly the case in text, audio, and image).
+<div></div>As to the question of what $w$ to use, this project will use different $w$ at each layer which can be set as hyperparameters. The heuristic we will use based on preliminary testing is that $w_\ell = 2(2)^\ell$ for layer number $\ell$ starting at 0, though both the first and last layers will be reserved for global attention (i.e. $w_0 = N, w_{L-1} = 0$ where $L$ is the number of layers). This heuristic should work well enough for most applications, though in general these window sizes can easily be tuned using hyperparameter sweeps/bayesian optimization, or just using domain knowledge as to whether there is local structure that could be benefited from being modeled separately (which is certainly the case in text, audio, and image).
 
 ### LEAP Equation
 
