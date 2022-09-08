@@ -34,17 +34,22 @@ class MultiheadLeap(nn.Module):
         k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         
+        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
+        q = self.drop(q)
+        f = self.drop(f)
+        v = self.drop(v)
+        
         # normalize vectors so dot products don't get too big
         if self.rescale:
             q = self.__real_norm(q)
             f = self.__real_norm(f)
             k = self.__real_norm(k)
-        
-        # apply dropout to regularize focus logits
-        f = self.drop(f)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
         focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
+        
+        # apply dropout to logits so that all tokens will have a chance at getting focus
+        focus_logits = self.drop(focus_logits)
         
         # masking out pad tokens
         if attention_mask is not None:
@@ -60,10 +65,6 @@ class MultiheadLeap(nn.Module):
         
         focused_k = self.__w_focus(focus_weights, cumulative_weights, k)
         focused_v = self.__w_focus(focus_weights, cumulative_weights, v)
-        
-        # regularize to stop queries/alignment from overfitting and overfitting reliance on sequence information
-        q = self.drop(q)
-        focused_v = self.drop(focused_v)
         
         # querying by measuring dot product alignment (with scaling)
         alignment = torch.sigmoid((q * focused_k).sum(dim = -1) * self.scaling_factor)
