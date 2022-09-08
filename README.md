@@ -38,7 +38,7 @@ config = LeapConfig(
     use_local_att = True, # whether to use windowed/local LEAP
     window_sizes = None, # window sizes to use for windowed/local LEAP for each layer (set automatically if None)
     n_heads = 4, # number of heads to use in multi-head attention
-    initializer_range = .02, # standard deviation for weight initialization
+    initializer_range = None, # variance for weight initialization, defaults to 1 / sqrt(hidden_size)
     hidden_dropout_prob = .1, # dropout value used for embeddings, attention, and feedforward layers
     rescale = 10 # what to rescale the focus values with, set lower if you have unstable/NaN loss
 )
@@ -273,7 +273,7 @@ Plotted is the validation perplexity of the LEAP Transformer (blue) and GPT2 (or
 
 As we can see on this small scale experiment, the LEAP Transformer stably with less perplexity compared to even GPT2 (of the same size). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Furthermore, this model already beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on Wikitext-2 perplexity even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2)).
 
-**Speed:** The LEAP Tranformer training run took ~26 minutes while GPT2 took ~48 minutes (1.8x) which should become more pronounced at context lengths greater than 2048 and larger model sizes.
+**Speed:** The LEAP Transformer training run took ~26 minutes while GPT2 took ~48 minutes (1.8x) which should become more pronounced at context lengths greater than 2048 and larger model sizes.
 
 ### Training details
 

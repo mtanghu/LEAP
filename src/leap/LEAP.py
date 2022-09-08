@@ -192,7 +192,7 @@ class LeapConfig(PretrainedConfig):
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
-                 initializer_range = .02):
+                 initializer_range = None):
         
         # check head sizes
         assert hidden_size % n_heads == 0, "hidden_size is not divisible by n_heads"
@@ -213,6 +213,9 @@ class LeapConfig(PretrainedConfig):
         else:
             # don't use windows, i.e. windows are global size
             window_sizes = [n_positions for _ in range(n_layer)]
+            
+        if initializer_range is None:
+            initializer_range = 1 / hidden_size**.5
 
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
