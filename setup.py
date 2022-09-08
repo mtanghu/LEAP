@@ -11,7 +11,7 @@ description.insert(3, '')
 
 setup(
     name='leap-transformer',
-    version='0.1.8',
+    version='0.1.9',
     license='CC0 1.0 Universal',
     author='Michael Hu',
     author_email='prmhu@yahoo.com',
