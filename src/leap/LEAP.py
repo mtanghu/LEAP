@@ -204,7 +204,7 @@ class LeapConfig(PretrainedConfig):
             assert len(window_sizes) == n_layer, "len(window_sizes) should match # of hidden layers"
 
         elif use_local_att is True and window_sizes is None:
-            window_sizes = [4 * (2**i) for i in range(n_layer)]
+            window_sizes = [2**i for i in range(n_layer)]
             
             # first & last layer should be global attention
             window_sizes[0] = n_positions
