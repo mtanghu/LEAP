@@ -115,9 +115,9 @@ class LeapBlock(nn.Module):
                                   rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
-        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4, bias = False)
+        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.activation = nn.GELU()
-        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size, bias = False)
+        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
@@ -235,7 +235,7 @@ class LeapForCausalLM(PreTrainedModel):
         super().__init__(config)
         self.config = config
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
+        self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size, bias = False)
         self.leap_model = LeapDecoder(config)
         self.last_norm = nn.LayerNorm(config.hidden_size)
         self.criterion = nn.CrossEntropyLoss()
