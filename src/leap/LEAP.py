@@ -34,16 +34,16 @@ class MultiheadLeap(nn.Module):
         k = k.reshape(batch_size, seq_len, self.n_head, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_head, self.head_size)
         
-        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
-        q = self.drop(q)
-        f = self.drop(f)
-        v = self.drop(v)
-        
         # normalize vectors so dot products don't get too big
         if self.rescale:
             q = self.__real_norm(q)
             f = self.__real_norm(f)
             k = self.__real_norm(k)
+            
+        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
+        q = self.drop(q)
+        f = self.drop(f)
+        v = self.drop(v)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
         focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
