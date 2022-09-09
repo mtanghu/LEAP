@@ -7,11 +7,11 @@ from transformers.modeling_outputs import CausalLMOutput
 
 
 class MultiheadLeap(nn.Module):
-    def __init__(self, hidden_size, n_heads, window_size, rescale = None, dropout = .1):
+    def __init__(self, hidden_size, n_head, window_size, rescale = None, dropout = .1):
         super(MultiheadLeap, self).__init__()
-        self.n_heads = n_heads
+        self.n_head = n_head
         self.hidden_size = hidden_size
-        self.head_size = hidden_size // n_heads
+        self.head_size = hidden_size // n_head
         self.window_size = window_size
         
         if rescale is not None:
@@ -29,10 +29,10 @@ class MultiheadLeap(nn.Module):
         batch_size, seq_len, hidden_size = v.shape
         
         # reshape for multihead formulation
-        q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        f = f.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        q = q.reshape(batch_size, seq_len, self.n_head, self.head_size)
+        f = f.reshape(batch_size, seq_len, self.n_head, self.head_size)
+        k = k.reshape(batch_size, seq_len, self.n_head, self.head_size)
+        v = v.reshape(batch_size, seq_len, self.n_head, self.head_size)
         
         # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
         q = self.drop(q)
@@ -111,7 +111,7 @@ class LeapBlock(nn.Module):
         # modules for leap
         # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
         self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
-        self.leap = MultiheadLeap(config.hidden_size, config.n_heads, window_size,
+        self.leap = MultiheadLeap(config.hidden_size, config.n_head, window_size,
                                   rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
@@ -189,13 +189,13 @@ class LeapDecoder(nn.Module):
 # Create configuation compatible with HuggingFace
 class LeapConfig(PretrainedConfig):
     model_type = "LeapForCausalLM"
-    def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
+    def __init__(self, hidden_size = 256, vocab_size = 32100, n_head = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
                  initializer_range = None):
         
         # check head sizes
-        assert hidden_size % n_heads == 0, "hidden_size is not divisible by n_heads"
+        assert hidden_size % n_head == 0, "hidden_size is not divisible by n_head"
         
         # check window sizes (and set them automatically if not set)
         assert not (use_local_att is False and window_sizes is not None), \
@@ -205,11 +205,13 @@ class LeapConfig(PretrainedConfig):
             assert len(window_sizes) == n_layer, "len(window_sizes) should match # of hidden layers"
 
         elif use_local_att is True and window_sizes is None:
-            window_sizes = [2 * (2**i) for i in range(n_layer)]
+            window_sizes = [n_positions] + [4, 8, 16, n_positions] * (n_layer // 4 + 1)
             
-            # first & last layer should be global attention
+            # first layer should be global attention (to give "context")
             window_sizes[0] = n_positions
-            window_sizes[-1] = n_positions
+            
+            # cut down to n_layer
+            window_sizes = window_sizes[:n_layer]
         else:
             # don't use windows, i.e. windows are global size
             window_sizes = [n_positions for _ in range(n_layer)]
@@ -218,7 +220,7 @@ class LeapConfig(PretrainedConfig):
             initializer_range = 1 / hidden_size**.5
 
         super().__init__(
-            hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
+            hidden_size = hidden_size, vocab_size = vocab_size, n_head = n_head,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
             n_layer = n_layer, rescale = rescale, hidden_dropout_prob = hidden_dropout_prob,
             initializer_range = initializer_range
