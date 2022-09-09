@@ -8,7 +8,7 @@ Reasons why LEAP may be able to replace full attention:
 
 2. **Dot-product rescaling**, we find that the current dot-product attention scaling method can lead to training instability especially in this more simple form of attention. We introduce a new dot product scaling method that should stop dot product similarities from scaling with model size that *may help the training stability of full attention as well* but will allow LEAP to scale to large model sizes stably
 
-3. **Linear in time local attention**, this concept has not been seen before in the literature as local attention typically has to scale in time complexity with the size of the local window. This project uses some simple mathematics and reuse of computations to get around this (and still be parallelizeable). This gets around the issue that longer sequences will typically need bigger local attention windows, but also builds upon the suprising strength of local + global attention (previously explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) and [BigBird](https://arxiv.org/abs/2007.14062) with the addition of random attention) with added mid-range sequence modeling. This project contends that this will give enough representational complexity to match full attention
+3. **Linear in time local attention**, this concept has not been seen before in the literature as local attention typically has to scale in time complexity with the size of the local window. This project uses some simple mathematics and reuse of computations to get around this (and still be parallelizeable). This gets around the issue that longer sequences will typically need bigger local attention windows, but also builds upon the surprising strength of local + global attention (previously explored in [Longformer](https://arxiv.org/pdf/2004.05150.pdf) and [BigBird](https://arxiv.org/abs/2007.14062) with the addition of random attention).
 
 4. **Built-in Explainability**, while explainability is not supported yet in this project, each token will be assigned an "focus weight" (which is softmaxed over the sequence) that can be used to explain what tokens the model is paying attention to, and which tokens are ignored. This is similar to the explainability offered by the original [Attention is All you Need](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) paper, though more simplified
 
@@ -174,7 +174,7 @@ $$
 }
 $$
 
-<div></div>As to the question of what $w$ to use, this project will use different $w$ at each layer which can be set as hyperparameters. The heuristic we will use based on preliminary testing is that $w_\ell = 2(2)^\ell$ for layer number $\ell$ starting at 0, though both the first and last layers will be reserved for global attention (i.e. $w_0 = N, w_{L-1} = 0$ where $L$ is the number of layers). This heuristic should work well enough for most applications, though in general these window sizes can easily be tuned using hyperparameter sweeps/bayesian optimization, or just using domain knowledge as to whether there is local structure that could be benefited from being modeled separately (which is certainly the case in text, audio, and image).
+<div></div>As to the question of what $w$ to use, this project will use different $w$ at each layer which can be set as hyperparameters. The heuristic used in this project is that the first layer should be global attention (where the window size is the sequence length) then the follow layers should follow window sizes of 4, then 8, then 16, then global attention, then back to 4 and repeat (Ex. the window sizes for a 9 layer LEAP transformer of sequence length 2048 would be [2048, 4, 8, 16, 2048, 4, 8, 16, 2048] repeating [4, 8, 16, 2048] if there were more layers). This heuristic should work well enough for most applications, though in general these window sizes can easily be tuned using hyperparameter sweeps/bayesian optimization, or just using domain knowledge as to whether there is local structure that could be benefited from being modeled separately (which is certainly the case in text, audio, and image).
 
 ### LEAP Equation
 
@@ -265,25 +265,14 @@ Because this is a causal language model the code is structured like one and impl
 - <div></div>Multihead Attention where LEAP is simply performed on down projected vectors of size $d_{model} \over n_{heads}$ in parallel with the same number of parameters as a single-head also as per Attention is All you Need by Viswani et al. (2017) which is carried over to GPT2
 - The only slight difference is that no biases are used in any of the linear projection layers like [PALM](https://arxiv.org/abs/2204.02311) as it fits with the theme of the rescaled dot-product (to keep pre-attention logits low) for increased training stability. This shouldn't affect modeling performance much (if not decreasing performance) in the comparison against GPT2
 
-## Preliminary Results
+## Scaling Behavior
 
-![alt text](https://github.com/mtanghu/Additive-Attention-Is-All-You-Need/blob/main/preliminary_results.png?raw=True)
-
-Plotted is the validation perplexity of the LEAP Transformer (blue) and GPT2 (orange) when trained on Wikitext-2 with a T5 tokenizer. The final test set perplexity of the LEAP transformer was 47.5 and the final test set perplexity of GPT2 was 59.7.
-
-As we can see on this small scale experiment, the LEAP Transformer stably with less perplexity compared to even GPT2 (of the same size). Even though these results are preliminary, the long sequence length of 2048 should already be enough to test the abilities of this model as being better than an RNN like LSTMs as found by this [Scaling Laws paper](https://arxiv.org/abs/2001.08361) (Figure 7 finds that LSTM scaling bends at around 1M parameters, and at context lengths of >1000, the LSTM should be unable to compete). Furthermore, this model already beats both [Mogrifier LSTM](https://arxiv.org/abs/1909.01792v2) and [AWD LSTM](https://arxiv.org/abs/1708.02182v1) (when not using dynamic eval) on Wikitext-2 perplexity even though those models use >30M parameters (see the [leaderboard on paperswithcode](https://paperswithcode.com/sota/language-modelling-on-wikitext-2)).
-
-**Speed:** The LEAP Transformer training run took ~26 minutes while GPT2 took ~48 minutes (1.8x) which should become more pronounced at context lengths greater than 2048 and larger model sizes.
+ON THE WAY
 
 ### Training details
 
-All models were trained on a single NVIDIA GeForce RTX 2060 with batch sizes of 2. Code can be found in ``FastLM.ipynb``   which uses the [HuggingFace 🤗 Transfomers](https://huggingface.co/) specifically the [Trainer API](https://huggingface.co/docs/transformers/main_classes/trainer).
+ON THE WAY
 
-Model details: all models had a model dimension of 128 (feedforward dimension is 4x the model dimension), 4 attention heads, 6 layers and dropout probability of .1 on embedding, attention, and feedforward layers. The window sizes for Local Additive Attention were [4, 8, 16, 32, 64, 2028] as per the heurstic described.
-
-Optimizer: [AdamW](https://arxiv.org/abs/1711.05101) with learning rate of 5e-4 to start and linear annealing, betas=(.9, .999) and weight decay = .01. Mixed precision with gradient clipping = 1 (max norm) is also used.
-
-**Tuning** Very little tuning has been done to optimize performance, only learning rates of [1e-4, 5e-4, 1e-3] have been tried (5e-4 is best for both GPT and Additive Attention in preliminary experiments) and only a few different kind of window size settings have been explored (<20). No tuning on the test set was performed and the only evaluation on the test set performed was for the results shown.
 
 
 ## References
