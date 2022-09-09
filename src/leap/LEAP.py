@@ -25,76 +25,80 @@ class MultiheadLeap(nn.Module):
         self.drop = nn.Dropout(dropout)
 
 
-    def forward(self, q, f1, f2, v, attention_mask = None):        
+    def forward(self, q, f, k, v, attention_mask = None):        
         batch_size, seq_len, hidden_size = v.shape
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        f1 = f1.reshape(batch_size, seq_len, self.n_heads, self.head_size)
-        f2 = f2.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        f = f.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_heads, self.head_size)
+        
+        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
+        q = self.drop(q)
+        f = self.drop(f)
+        v = self.drop(v)
         
         # normalize vectors so dot products don't get too big
         if self.rescale:
             q = self.__real_norm(q)
-            f1 = self.__real_norm(f1)
-            f2 = self.__real_norm(f2)
-            v = self.__real_norm(v)
-        
-        # apply dropout to regularize focus scores (only dropout on one is fine because of the dot product)
-        f1 = self.drop(f1)
+            f = self.__real_norm(f)
+            k = self.__real_norm(k)
 
-        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") of focus vectors
-        focus_scores = (f1 * f2).sum(dim = -1)
+        # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
+        focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
         
-        # scaling
-        focus_scores = focus_scores * self.scaling_factor
+        # apply dropout to logits so that all tokens will have a chance at getting focus
+        focus_logits = self.drop(focus_logits)
         
         # masking out pad tokens
         if attention_mask is not None:
-            focus_scores += attention_mask
+            focus_logits += attention_mask
         
         # manual softmax within cumulative sum
-        focus_scores = torch.exp(focus_scores)
-        focus_scores = focus_scores.unsqueeze(-1)
+        focus_weights = torch.exp(focus_logits)
+        focus_weights = focus_weights.unsqueeze(-1)
         
-        # windowed cumsum 
-        s = torch.cumsum(focus_scores * v, dim = 1)
-        s = s - self.__window_align(s)
-        z = torch.cumsum(focus_scores, dim = 1)
-        z = z - self.__window_align(z)
+        # normalization term for softmax
+        cumulative_weights = torch.cumsum(focus_weights, dim = 1)
+        cumulative_weights = cumulative_weights - self.__window_align(cumulative_weights)
         
-        # finish off manual softmax by dividing by normalization term z (with numerical stability term)
-        focused_v = s / (z + 1e-5)
-        
-        # regularize to stop queries/alignment from overfitting and overfitting reliance on sequence information
-        focused_v = self.drop(focused_v)
+        focused_k = self.__w_focus(focus_weights, cumulative_weights, k)
+        focused_v = self.__w_focus(focus_weights, cumulative_weights, v)
         
         # querying by measuring dot product alignment (with scaling)
-        alignment = torch.sigmoid((q * focused_v).sum(dim = -1) * self.scaling_factor)
-        focused_v = alignment.unsqueeze(-1) * focused_v
+        alignment = torch.sigmoid((q * focused_k).sum(dim = -1) * self.scaling_factor)
+        attention = alignment.unsqueeze(-1) * focused_v
         
         # concat heads
-        focused_v = focused_v.reshape(batch_size, seq_len, hidden_size)
+        attention = focused_v.reshape(batch_size, seq_len, hidden_size)
         
-        return focused_v
+        return attention
 
 
-    def __real_norm(self, x):
+    def __real_norm(self, mod):
         # normalize x on the last dimension (the head dimension in this case) with eps term for stability
-        return (x - x.mean(dim = -1).unsqueeze(-1)) / (x.std(dim = -1).unsqueeze(-1) + 1e-5)
+        return (mod - mod.mean(dim = -1).unsqueeze(-1)) / (mod.std(dim = -1).unsqueeze(-1) + 1e-5)
 
 
-    def __window_align(self, x):
-        seq_len = x.shape[1]
+    def __w_focus(self, focus_weights, cumulative_weights, mod):
+        # pass cumulative weights so they don't have to be recalculated
+        weighted_mod = torch.cumsum(focus_weights * mod, dim = 1)
+        weighted_mod = weighted_mod - self.__window_align(weighted_mod)
         
+        # finish softmax by dividing by weight totals (with numerical stability term)
+        focused_mod = weighted_mod / (cumulative_weights + 1e-5)
+        return focused_mod
+
+
+    def __window_align(self, mod):
         # zero out the last window_size vectors, and roll these vectors to the front
         # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
-        clone_x = torch.clone(x)
-        clone_x[:,-self.window_size:] = 0
-        clone_x = torch.roll(clone_x, self.window_size, dims = 1)
+        clone_mod = torch.clone(mod) # clone keeps gradients
+        clone_mod[:,-self.window_size:] = 0
+        clone_mod = torch.roll(clone_mod, self.window_size, dims = 1)
         
-        return clone_x
+        return clone_mod
     
     
 
@@ -111,9 +115,9 @@ class LeapBlock(nn.Module):
                                   rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
         # modules for feedforward layer (aka boom layer)
-        self.boom = nn.Linear(config.hidden_size, config.hidden_size*4, bias = False)
+        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4, bias = False)
         self.activation = nn.GELU()
-        self.unboom = nn.Linear(4*config.hidden_size, config.hidden_size, bias = False)
+        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size, bias = False)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
@@ -123,10 +127,10 @@ class LeapBlock(nn.Module):
         mod_normed = self.pre_norm(mod)
         
         # projections so each matrix has its own purpose
-        queries, focus1, focus2, values = self.projections(mod_normed).chunk(4, dim = -1)
+        q, f, k, v = self.projections(mod_normed).chunk(4, dim = -1)
         
         # unnormed residual connection
-        mod = mod + self.leap(queries, focus1, focus2, values, attention_mask)
+        mod = mod + self.leap(q, f, k, v, attention_mask)
         
         # feedforward layer with pre-norming
         mod_normed = self.pre_norm(mod)
@@ -160,11 +164,11 @@ class LeapDecoder(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, 
-                input_embs, 
-                attention_mask, 
-                pooler_index=0):
-
+    def forward(self, input_embs, attention_mask):
+        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
+        attention_mask = (1.0 - attention_mask) * -100.0
+        attention_mask = attention_mask.unsqueeze(-1)
+        
         batch_size, seq_length, _ = input_embs.shape
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_embs.device)
         position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
@@ -188,7 +192,7 @@ class LeapConfig(PretrainedConfig):
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
-                 initializer_range = .02):
+                 initializer_range = None):
         
         # check head sizes
         assert hidden_size % n_heads == 0, "hidden_size is not divisible by n_heads"
@@ -201,13 +205,17 @@ class LeapConfig(PretrainedConfig):
             assert len(window_sizes) == n_layer, "len(window_sizes) should match # of hidden layers"
 
         elif use_local_att is True and window_sizes is None:
-            window_sizes = [4 * (2**i) for i in range(n_layer)]
+            window_sizes = [2 * (2**i) for i in range(n_layer)]
             
-            # last layer should still be global attention
+            # first & last layer should be global attention
+            window_sizes[0] = n_positions
             window_sizes[-1] = n_positions
         else:
             # don't use windows, i.e. windows are global size
             window_sizes = [n_positions for _ in range(n_layer)]
+            
+        if initializer_range is None:
+            initializer_range = 1 / hidden_size**.5
 
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_heads = n_heads,
@@ -224,7 +232,7 @@ class LeapForCausalLM(PreTrainedModel):
     def __init__(self,config):
         super().__init__(config)
         self.config = config
-        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
+        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.leap_model = LeapDecoder(config)
         self.last_norm = nn.LayerNorm(config.hidden_size)
@@ -239,10 +247,6 @@ class LeapForCausalLM(PreTrainedModel):
     def forward(self, input_ids, attention_mask = None, labels = None, return_dict = False, **kwargs):
         if attention_mask is None:
             attention_mask = torch.ones(input_ids.shape).to(input_ids.device)
-
-        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
-        attention_mask = (1.0 - attention_mask) * -100.0
-        attention_mask = attention_mask.unsqueeze(-1)
         
         embds = self.word_embedding(input_ids)
         layer_outputs = self.leap_model(embds, attention_mask)
@@ -251,6 +255,9 @@ class LeapForCausalLM(PreTrainedModel):
         
         loss = None
         if labels is not None:
+            # set pad token labels to -100 to be ignored
+            labels.masked_fill_(attention_mask == 0, -100)
+            
             # shift logits the same gpt2 does at
             # https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
             shift_logits = logits[..., :-1, :].contiguous()

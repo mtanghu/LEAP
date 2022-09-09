@@ -154,10 +154,10 @@ class FastformerDecoder(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, 
-                input_embs, 
-                attention_mask, 
-                pooler_index=0):
+    def forward(self, input_embs, attention_mask):
+        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
+        attention_mask = (1.0 - attention_mask) * -10000.0
+        attention_mask = attention_mask.unsqueeze(2)
 
         batch_size, seq_length, _ = input_embs.shape
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_embs.device)
@@ -181,7 +181,7 @@ class FastformerLMConfig(PretrainedConfig):
     model_type = "FastformerForCausalLM"
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_heads = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
-                 n_layer = 4, rescale = 7, hidden_dropout_prob = .1,
+                 n_layer = 4, rescale = 15, hidden_dropout_prob = .1,
                  initializer_range = .02):
         
         assert not (use_local_att is False and window_sizes is not None), \
@@ -191,9 +191,10 @@ class FastformerLMConfig(PretrainedConfig):
             assert len(window_sizes) == n_layer, "len(window_sizes) should match # of hidden layers"
 
         elif use_local_att is True and window_sizes is None:
-            window_sizes = [4 * (2**i) for i in range(n_layer)]
+            window_sizes = [2 * (2**i) for i in range(n_layer)]
             
-            # last layer should still be global attention
+            # first & last layer should be global attention
+            window_sizes[0] = n_positions
             window_sizes[-1] = n_positions
         else:
             # don't use windows, i.e. windows are global size
@@ -214,7 +215,7 @@ class FastformerForCausalLM(PreTrainedModel):
     def __init__(self,config):
         super().__init__(config)
         self.config = config
-        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx = 0)
+        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.proj_logits = nn.Linear(config.hidden_size, config.vocab_size)
         self.fastformer_model = FastformerDecoder(config)
         self.last_norm = nn.LayerNorm(config.hidden_size)
@@ -229,10 +230,6 @@ class FastformerForCausalLM(PreTrainedModel):
     def forward(self, input_ids, attention_mask = None, labels = None, **kwargs):
         if attention_mask is None:
             attention_mask = torch.ones(input_ids.shape)
-            
-        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
-        attention_mask = (1.0 - attention_mask) * -10000.0
-        attention_mask = attention_mask.unsqueeze(2)
         
         embds = self.word_embedding(input_ids)
         layer_outputs = self.fastformer_model(embds, attention_mask)
@@ -241,6 +238,9 @@ class FastformerForCausalLM(PreTrainedModel):
         
         loss = None
         if labels is not None:
+            # set pad token labels to -100 to be ignored
+            labels.masked_fill_(attention_mask == 0, -100)
+
             # shift logits the same gpt2 does at
             # https://huggingface.co/transformers/v3.5.1/_modules/transformers/modeling_gpt2.html
             shift_logits = logits[..., :-1, :].contiguous()
