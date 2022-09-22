@@ -106,7 +106,7 @@ class LeapBlock(nn.Module):
     def __init__(self, config, window_size):
         super(LeapBlock, self).__init__()
 
-        self.pre_norm = nn.LayerNorm(config.hidden_size)
+        self.attn_norm = nn.LayerNorm(config.hidden_size)
         
         # modules for leap
         # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
@@ -123,18 +123,14 @@ class LeapBlock(nn.Module):
 
 
     def forward(self, mod, attention_mask):
-        # pre-norming
-        mod_normed = self.pre_norm(mod)
-        
-        # projections so each matrix has its own purpose
-        q, f, k, v = self.projections(mod_normed).chunk(4, dim = -1)
+        # pre-norming with projections so each matrix has its own purpose
+        q, f, k, v = self.projections(self.attn_norm(mod)).chunk(4, dim = -1)
         
         # unnormed residual connection
         mod = mod + self.leap(q, f, k, v, attention_mask)
         
         # feedforward layer with pre-norming
-        mod_normed = self.pre_norm(mod)
-        mod = mod + self.__boom(self.boom_norm(mod_normed))
+        mod = mod + self.__boom(self.boom_norm(mod))
         
         return mod
 
