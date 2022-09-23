@@ -14,6 +14,8 @@ class MultiheadLeap(nn.Module):
         self.head_size = hidden_size // n_head
         self.window_size = window_size
         
+        self.values_weight = nn.Parameter(torch.zeros(hidden_size))
+        
         if rescale is not None:
             self.rescale = True
             self.scaling_factor = (1 / self.head_size) * rescale
@@ -27,23 +29,26 @@ class MultiheadLeap(nn.Module):
 
     def forward(self, q, f, k, v, attention_mask = None):        
         batch_size, seq_len, hidden_size = v.shape
+                
+        # unparameterized norming of vectors so dot products don't get too big
+        if self.rescale:
+            q = self.__real_norm(q)
+            f = self.__real_norm(f)
+            k = self.__real_norm(k)
+            
+        # norm values with element-wise weighting (since it won't be dot-producted)
+        v = self.__real_norm(v) * self.values_weight
+            
+        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
+        q = self.drop(q)
+        f = self.drop(f)
+        v = self.drop(v)
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_head, self.head_size)
         f = f.reshape(batch_size, seq_len, self.n_head, self.head_size)
         k = k.reshape(batch_size, seq_len, self.n_head, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_head, self.head_size)
-        
-        # normalize vectors so dot products don't get too big
-        if self.rescale:
-            q = self.__real_norm(q)
-            f = self.__real_norm(f)
-            k = self.__real_norm(k)
-            
-        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
-        q = self.drop(q)
-        f = self.drop(f)
-        v = self.drop(v)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
         focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
