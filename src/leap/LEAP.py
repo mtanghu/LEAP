@@ -32,11 +32,6 @@ class MultiheadLeap(nn.Module):
             
         # norm values with element-wise weighting (no bias for stability)
         v = self.__real_norm(v) * self.values_weight
-            
-        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
-        q = self.drop(q)
-        f = self.drop(f)
-        v = self.drop(v)
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_head, self.head_size)
@@ -49,6 +44,11 @@ class MultiheadLeap(nn.Module):
             q = self.__real_norm(q)
             f = self.__real_norm(f)
             k = self.__real_norm(k)
+            
+        # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
+        q = self.drop(q)
+        f = self.drop(f)
+        v = self.drop(v)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
         focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
