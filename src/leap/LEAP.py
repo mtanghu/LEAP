@@ -153,18 +153,9 @@ class LeapDecoder(nn.Module):
     def __init__(self, config):
         super(LeapDecoder, self).__init__()
         self.config = config
+        self.decoders = nn.ModuleList([LeapBlock(config, window_size)
+                                       for _, window_size in zip(range(config.n_layer), config.window_sizes)])
         
-        if config.rnn is True:
-            self.decoders = nn.ModuleList([
-                RnnBlock(config)
-                for _ in range(config.n_layer)
-            ])
-        else:
-            self.decoders = nn.ModuleList([
-                LeapBlock(config, window_size)
-                for _, window_size in zip(range(config.n_layer), config.window_sizes)
-            ])
-
         self.position_embeddings = nn.Embedding(config.n_positions, config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -197,7 +188,7 @@ class LeapConfig(PretrainedConfig):
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_head = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
-                 initializer_range = None, rnn = False):
+                 initializer_range = None):
         
         # check head sizes
         assert hidden_size % n_head == 0, "hidden_size is not divisible by n_head"
@@ -228,7 +219,7 @@ class LeapConfig(PretrainedConfig):
             hidden_size = hidden_size, vocab_size = vocab_size, n_head = n_head,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
             n_layer = n_layer, rescale = rescale, hidden_dropout_prob = hidden_dropout_prob,
-            initializer_range = initializer_range, rnn = rnn
+            initializer_range = initializer_range
         )
 
 
@@ -236,7 +227,7 @@ class LeapConfig(PretrainedConfig):
 class LeapForCausalLM(PreTrainedModel):
     config_class = LeapConfig
     
-    def __init__(self,config):
+    def __init__(self, config):
         super().__init__(config)
         self.config = config
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
@@ -262,7 +253,7 @@ class LeapForCausalLM(PreTrainedModel):
         
         loss = None
         if labels is not None:
-            # set pad token labels to -100 to be ignored by CrossEntropyLoss (natively)
+            # set pad token labels to -100 to be ignored
             labels.masked_fill_(attention_mask == 0, -100)
             
             # shift logits the same gpt2 does at
@@ -295,51 +286,3 @@ class LeapForCausalLM(PreTrainedModel):
 # register config with huggingface
 AutoConfig.register("LeapForCausalLM", LeapConfig)
 AutoModelForCausalLM.register(LeapConfig, LeapForCausalLM)
-
-
-
-
-##### appendix #####
-class RnnBlock(nn.Module):
-    def __init__(self, config):
-        super(RnnBlock, self).__init__()
-
-        self.attn_norm = nn.LayerNorm(config.hidden_size)
-        
-        self.rnn = nn.LSTM(
-            input_size = config.hidden_size,
-            hidden_size = config.hidden_size,
-            num_layers = 1,
-            batch_first = True,
-            dropout = config.hidden_dropout_prob
-        )
-
-        # modules for feedforward layer (aka boom layer)
-        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4)
-        self.activation = nn.GELU()
-        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size)
-        self.boom_norm = nn.LayerNorm(config.hidden_size)
-        self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
-
-
-    def forward(self, mod, attention_mask):
-        # pre-norming and residual
-        mod = mod + self.rnn(self.attn_norm(mod))[0]
-        
-        # feedforward layer with pre-norming
-        mod = mod + self.__boom(self.boom_norm(mod))
-        
-        return mod
-
-
-    def __boom(self, mod):
-        mod = self.boom(mod)
-        mod = self.activation(mod)
-        mod = self.unboom(mod)
-        
-        # possible parameter saving like SHA-RNN (seems to slow down training significantly)
-        # mod = torch.stack(mod.chunk(4, dim = -1), dim = -1).sum(dim = -1)
-        
-        mod = self.boom_drop(mod)
-
-        return mod
