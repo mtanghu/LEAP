@@ -29,14 +29,8 @@ class MultiheadLeap(nn.Module):
 
     def forward(self, q, f, k, v, attention_mask = None):        
         batch_size, seq_len, hidden_size = v.shape
-                
-        # unparameterized norming of vectors so dot products don't get too big
-        if self.rescale:
-            q = self.__real_norm(q)
-            f = self.__real_norm(f)
-            k = self.__real_norm(k)
             
-        # norm values with element-wise weighting (since it won't be dot-producted)
+        # norm values with element-wise weighting (no bias for stability)
         v = self.__real_norm(v) * self.values_weight
             
         # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
@@ -49,6 +43,12 @@ class MultiheadLeap(nn.Module):
         f = f.reshape(batch_size, seq_len, self.n_head, self.head_size)
         k = k.reshape(batch_size, seq_len, self.n_head, self.head_size)
         v = v.reshape(batch_size, seq_len, self.n_head, self.head_size)
+        
+        # unparameterized norming of vectors so dot products don't explode (also why it is after reshaping)
+        if self.rescale:
+            q = self.__real_norm(q)
+            f = self.__real_norm(f)
+            k = self.__real_norm(k)
 
         # manual "matrix dot product" for speed (in einsum notation "bshe, bshe->bsh") with scaling
         focus_logits = (f * k).sum(dim = -1) * self.scaling_factor
