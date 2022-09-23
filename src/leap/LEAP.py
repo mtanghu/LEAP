@@ -1,9 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-import math
-
 from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 
@@ -23,7 +20,7 @@ class MultiheadLeap(nn.Module):
         else:
             # use normal scaling factor
             self.rescale = False
-            self.scaling_factor = (1 / math.sqrt(self.head_size))
+            self.scaling_factor = (1 / self.head_size**.5)
 
         self.drop = nn.Dropout(dropout)
 
@@ -110,53 +107,28 @@ class LeapBlock(nn.Module):
         super(LeapBlock, self).__init__()
 
         self.attn_norm = nn.LayerNorm(config.hidden_size)
-        self.leap = MultiheadLeap(config.hidden_size, config.n_head, window_size,
-                                      rescale = config.rescale, dropout = config.hidden_dropout_prob)
         
+        # modules for leap
+        # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
+        self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
+        self.leap = MultiheadLeap(config.hidden_size, config.n_head, window_size,
+                                  rescale = config.rescale, dropout = config.hidden_dropout_prob)
+
+        # modules for feedforward layer (aka boom layer)
+        self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4)
         self.activation = nn.GELU()
+        self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size)
         self.boom_norm = nn.LayerNorm(config.hidden_size)
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
-        
-        # whether to use less proportionally less parameters feedfoward layers for better scaling
-        if config.bottleneck is True:
-            self.bottleneck = True
-            
-            # leap modules
-            self.down_proj = nn.Linear(config.hidden_size, int(4 * math.sqrt(config.hidden_size)))
-            
-            # seperate projection layers for more equal memory usage compared to feedforward layers
-            self.Wq = nn.Linear(int(4 * math.sqrt(config.hidden_size)), config.hidden_size)
-            self.Wf = nn.Linear(int(4 * math.sqrt(config.hidden_size)), config.hidden_size)
-            self.Wk = nn.Linear(int(4 * math.sqrt(config.hidden_size)), config.hidden_size)
-            self.Wv = nn.Linear(int(4 * math.sqrt(config.hidden_size)), config.hidden_size)
-            
-            self.boom = nn.Linear(config.hidden_size, int(4 * math.sqrt(config.hidden_size)))
-            self.unboom = nn.Linear(int(4 * math.sqrt(config.hidden_size)), config.hidden_size)
-        else:
-            self.bottleneck = False
-            
-            # note: one larger linear layer is equivalent to having seperate projection matrices and is faster
-            self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
-
-            # feedforward layers aka "boom" layers
-            self.boom = nn.Linear(config.hidden_size, config.hidden_size * 4)
-            self.unboom = nn.Linear(4 * config.hidden_size, config.hidden_size)
 
 
     def forward(self, mod, attention_mask):
-        # pre-norming
-        mod_normed = self.attn_norm(mod)
+        # pre-norming with projections so each matrix has its own purpose
+        q, f, k, v = self.projections(self.attn_norm(mod)).chunk(4, dim = -1)
         
-        if self.bottleneck is True:
-            proj = self.down_proj(mod_normed)
-            q, f, k, v = self.Wq(proj), self.Wf(proj), self.Wk(proj), self.Wv(proj)
-        else:
-            # projections so each matrix has its own purpose
-            q, f, k, v = self.projections(mod_normed).chunk(4, dim = -1)
-
         # unnormed residual connection
         mod = mod + self.leap(q, f, k, v, attention_mask)
-
+        
         # feedforward layer with pre-norming
         mod = mod + self.__boom(self.boom_norm(mod))
         
@@ -225,7 +197,7 @@ class LeapConfig(PretrainedConfig):
     def __init__(self, hidden_size = 256, vocab_size = 32100, n_head = 4,
                  use_local_att = True, window_sizes = None, n_positions = 1024,
                  n_layer = 4, rescale = 10, hidden_dropout_prob = .1,
-                 initializer_range = None, bottleneck = True, rnn = False):
+                 initializer_range = None, rnn = False):
         
         # check head sizes
         assert hidden_size % n_head == 0, "hidden_size is not divisible by n_head"
@@ -250,13 +222,13 @@ class LeapConfig(PretrainedConfig):
             window_sizes = [n_positions for _ in range(n_layer)]
             
         if initializer_range is None:
-            initializer_range = 1 / math.sqrt(hidden_size)
+            initializer_range = 1 / hidden_size**.5
 
         super().__init__(
             hidden_size = hidden_size, vocab_size = vocab_size, n_head = n_head,
             use_local_att = use_local_att, window_sizes = window_sizes, n_positions = n_positions,
             n_layer = n_layer, rescale = rescale, hidden_dropout_prob = hidden_dropout_prob,
-            initializer_range = initializer_range, bottleneck = bottleneck, rnn = rnn
+            initializer_range = initializer_range, rnn = rnn
         )
 
 
@@ -264,7 +236,7 @@ class LeapConfig(PretrainedConfig):
 class LeapForCausalLM(PreTrainedModel):
     config_class = LeapConfig
     
-    def __init__(self, config):
+    def __init__(self,config):
         super().__init__(config)
         self.config = config
         self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
@@ -314,10 +286,6 @@ class LeapForCausalLM(PreTrainedModel):
             module.weight.data.normal_(mean = 0.0, std = self.config.initializer_range)
             if isinstance(module, nn.Linear) and module.bias is not None:
                 module.bias.data.zero_()
-        if self.config.bottleneck is True and isinstance(module, nn.Linear):
-            # better initialization for bottleneck layers
-            if module.in_features < module.out_features:
-                module.weight.data.normal_(mean = 0.0, std = 1 / math.sqrt(module.in_features))
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
