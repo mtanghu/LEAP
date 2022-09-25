@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from transformers import AutoConfig, AutoModelForCausalLM, PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 
+import warnings
+
 
 
 class MultiheadLeap(nn.Module):
@@ -13,8 +15,6 @@ class MultiheadLeap(nn.Module):
         self.hidden_size = hidden_size
         self.head_size = hidden_size // n_head
         self.window_size = window_size
-        
-        self.values_weight = nn.Parameter(torch.zeros(hidden_size))
         
         if rescale is not None:
             self.rescale = True
@@ -29,9 +29,6 @@ class MultiheadLeap(nn.Module):
 
     def forward(self, q, f, k, v, attention_mask = None):        
         batch_size, seq_len, hidden_size = v.shape
-            
-        # norm values with element-wise weighting (no bias for stability)
-        v = self.__real_norm(v) * self.values_weight
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_head, self.head_size)
@@ -44,6 +41,7 @@ class MultiheadLeap(nn.Module):
             q = self.__real_norm(q)
             f = self.__real_norm(f)
             k = self.__real_norm(k)
+            v = self.__real_norm(v)
             
         # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
         q = self.drop(q)
@@ -197,6 +195,10 @@ class LeapConfig(PretrainedConfig):
         
         # check head sizes
         assert hidden_size % n_head == 0, "hidden_size is not divisible by n_head"
+        
+        if (hidden_size // n_head) > 64:
+            warnings.warn("Using a hidden_size-to-head ratio of greater than 64 is not ideal as"
+                          " LEAP uses a simplified form of attention that relies on having many heads")
         
         # check window sizes (and set them automatically if not set)
         assert not (use_local_att is False and window_sizes is not None), \
