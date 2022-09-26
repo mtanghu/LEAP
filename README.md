@@ -4,7 +4,7 @@ This project implements a novel linear attention mechanism based on "softmax-wei
 
 Reasons why LEAP may be able to replace full attention:
 
-1. The models considered in this project run faster than a standard Transformer when run with the same # of layers and layer sizes even on small sequence lengths (the math allows for *highly parallelizeable* operations which is not always the case with linear attention) which offers extra ease of use
+1. The models considered in this project run **faster** than a standard Transformer of the same size even on small sequence lengths (the math allows for *highly parallelizeable* operations which is not always the case with linear attention) which offers high ease of use
 
 2. **Dot-product rescaling**, we find that the current dot-product attention scaling method can lead to training instability especially in this more simple form of attention. We introduce a new dot product scaling method that should stop dot product similarities from scaling with model size that *may help the training stability of full attention as well* but will allow LEAP to scale to large model sizes stably
 
@@ -68,13 +68,28 @@ pip install -e .
 ```
 
 
-## Model Structure
+## Brief LEAP description
+
+The math tricky and overly verbose/complicated at the moment but can be found in this repo with a write-up  [here](https://github.com/mtanghu/LEAP/blob/main/src/leap/README.md). As stated the general concept is just to have a cumulative sum of the sequence that is weighted with values that are passed through a softmax over the sequence length (done causally though). What will be described here are just some high level details.
+
+### Why cumulative sum?
+
+Cumulative sums were used reasonably successfully in previous linear attention mechanisms like [Linear Transformers](https://arxiv.org/pdf/2006.16236.pdf) though they don't use the *parallel* cumulative sum that can be run in logarithmic time (w.r.t. sequence length) as noted by [Performer](https://arxiv.org/abs/2009.14794). This can be seen in the following circuit diagram (from [wikipedia prefix sum page](https://en.wikipedia.org/wiki/Prefix_sum)).
+
+
+![alt text](https://upload.wikimedia.org/wikipedia/commons/8/81/Prefix_sum_16.svg)
+
+Where each wire represents an element in the sequence as input (coming from the top) and where the output of each wire the cumulative sum up to that element in the sequence. Luckily this is already implemented by CUDA [as seen here](https://nvlabs.github.io/cub/structcub_1_1_device_scan.html) where they report that the cumulative sum operation runs about as fast as copying! What might set this off as being a good choice for sequence modelling is how the diagram almost shows a kind of "residual connections through time" in a way that seems vaguely neural.
+
+The concept for LEAP is just to weight each element in the sequence before cumulative summing as a kind of "attention" or "focus". This implemented in a multihead way with queries, keys, and values and is meant to be something of an analog to full attention.
+
+### Model Structure
 
 Because this is a causal language model the code is structured like one and implements the following to be fair comparison against GPT2 [paper for reference by Radford et al. (2019)](https://life-extension.github.io/2020/05/27/GPT%E6%8A%80%E6%9C%AF%E5%88%9D%E6%8E%A2/language-models.pdf) where LEAP just replaces the scaled-dot product Attention module in a Transformer:
 
 - Pre-norming with a layernorm before projecting to token logits like GPT2
 - GELU activation is used in the feedforward layer like GPT2
-- Learned positional embeddings as per [GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2 (though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) were considered, but decided against because it would unfairly give an advantage to the model when compared against normal Transformers/gpt2 which uses learned absolute positional embeddings
+- Learned positional embeddings as per [GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2 (though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) were considered, but decided against because it would unfairly give an advantage to the model when compared against normal Transformers/gpt2 which uses learned absolute positional embeddings. Just as a note, positional embeddings are still "needed" as a cumulative sum would not necessarily encode position information.
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by Attention is All you Need, GPT1 and likewise GPT2
 - Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
 - Attention masking of pad tokens ([Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
@@ -83,12 +98,22 @@ Because this is a causal language model the code is structured like one and impl
 
 ## Scaling Experiment
 
-ON THE WAY
+Following landmark papers [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) which has since been revised by [Training Compute-Optimal Large Language Models](https://arxiv.org/pdf/2203.15556.pdf) we hope to show the scaling behavior of LEAP and how it's quite comparable. Note that as found by [Scaling Laws vs Model Architectures](https://arxiv.org/pdf/2207.10551.pdf), few to no models can match the scaling performance of Transformers. The experiment shown are done on much less data and much less compute, but at least preliminarily show LEAP's very similar capabilities. 
 
-### Training details
+![alt text](https://raw.githubusercontent.com/mtanghu/LEAP/main/Experiments/powerlaws.png)
+The parameters scaling law has a higher alpha that what is reported in [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) because data and parameters were scaled in tandem (for speed and also to be closer to compute optimal). Only non-embedding parameters are reported following [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) especially because the embedding parameters were a very significant proportion of the parameters. The compute scaling laws are in line with the 3 papers stated which all report a alpha/exponent of around -.05 even though "optimal compute" practices weren't followed (due to memory and compute limitations).
 
-ON THE WAY
+## Training details
 
+Exact training details and logs can be found in `/Experiments/Scaling.ipynb` of this notebook. 
+
+
+- **Dataset:** subsets of Wikitext-103 so that the number of tokens would match the recommendation of  [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) where the (# parameters)^.74 is directly proportional to the number of tokens. The largest test uses the shown in the figure does use the entirety of Wikitext-103
+- **Tokenizer** a word-level tokenizer was used, but due to memory and compute constraints, the vocab size was limited to 8192. This means that the losses shown cannot be directly compared to Wikitext-103 benchmarks, but shouldn't particularly change scaling behavior
+- **Hyperparameters:** LEAP uses all the same hyperparameters as GPT2, all of which were chosen to be *advantageous to GPT2 and not LEAP* (likely better hyperparameters can be found for LEAP). We use a layer number ratio according to [Levine 2020](https://proceedings.neurips.cc/paper/2020/file/ff4dfdf5904e920ce52b48c1cef97829-Paper.pdf) that are best for Transformers like GPT2, and head size of 64. LEAP introduces two new hyperparameters, though they were set automatically based on preliminary testing and not tuned (they don't seem to strongly affect performance either)
+- **Training:** Training was performed for only 1 epoch on sequence lengths of 1024 (by splitting and concatenating articles) with cosine learning rate schedule with a warmup ratio of .05. This is all in line with [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf). The batch sizes were very small of just 2 because of memory constraints
+
+**Finer details:** [AdamW](https://arxiv.org/abs/1711.05101) optimizer with default configuration and learning rate of 5e-4 (after warmup and is cosine annealed). No dropout was used due to only training for 1 epoch as per the recommendation of [One Epoch Is All You Need](https://arxiv.org/abs/1906.06669)
 
 
 ## References
@@ -122,9 +147,9 @@ Press, O., & Wolf, L. (2016). Using the output embedding to improve language mod
 
 Kaplan, Jared, et al. "Scaling laws for neural language models." _arXiv preprint arXiv:2001.08361_ (2020).
 
-Melis, G., Kočiský, T., & Blunsom, P. (2019). Mogrifier lstm. arXiv preprint arXiv:1909.01792.
+Choromanski, Krzysztof, et al. "Rethinking attention with performers." _arXiv preprint arXiv:2009.14794_ (2020).
 
-Merity, S., Keskar, N. S., & Socher, R. (2017). Regularizing and optimizing LSTM language models. arXiv preprint arXiv:1708.02182.
+Komatsuzaki, A. (2019). One epoch is all you need. _arXiv preprint arXiv:1906.06669_.
 
 Loshchilov, I., & Hutter, F. (2017). Decoupled weight decay regularization. _arXiv preprint arXiv:1711.05101_.
 
