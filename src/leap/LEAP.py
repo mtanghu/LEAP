@@ -199,6 +199,8 @@ class LeapConfig(PretrainedConfig):
         if (hidden_size // n_head) > 64:
             warnings.warn("Using a hidden_size-to-head ratio of greater than 64 is not ideal as"
                           " LEAP uses a simplified form of attention that relies on having many heads")
+        if (hidden_size // n_head) < 32:
+            warnings.warn("Using a hidden_size-to-head ratio of less than 64 can sometimes lead to instability")
         
         # check window sizes (and set them automatically if not set)
         assert not (use_local_att is False and window_sizes is not None), \
