@@ -74,7 +74,7 @@ class MultiheadLeap(nn.Module):
         attention = alignment.unsqueeze(-1) * focused_v
         
         # concat heads
-        attention = focused_v.reshape(batch_size, seq_len, hidden_size)
+        attention = attention.reshape(batch_size, seq_len, hidden_size)
         
         return attention
 
