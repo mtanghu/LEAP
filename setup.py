@@ -14,7 +14,7 @@ setup(
     ),
     packages=find_packages('src'),
     package_dir={'': 'src'},
-    long_description='\n'.join(description),
+    long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type='text/markdown',
     keywords='linear transformer NLP deep learning pytorch',
     install_requires=[
