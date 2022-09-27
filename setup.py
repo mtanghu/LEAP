@@ -2,16 +2,9 @@ from setuptools import setup, find_packages
 
 
 
-# put a disclaimer in the readme for publishing on pypi
-description = open("README.md", "r", encoding="utf-8").read().split("\n")
-description.insert(2, "NOTE: The description shown here is just the github README. As such, some of the equations may not render. Checkout out the github for a more refined description where you can also see the code and contribute!")
-description.insert(3, '')
-
-
-
 setup(
     name='leap-transformer',
-    version='1.0.0',
+    version='1.0.1',
     license='CC0 1.0 Universal',
     author='Michael Hu',
     author_email='prmhu@yahoo.com',
