@@ -91,8 +91,6 @@ Because this is a causal language model the code is structured like one and impl
 - GELU activation is used in the feedforward layer like GPT2
 - Learned positional embeddings as per [GPT1 paper by Radford et al. (2018)](https://s3-us-west-2.amazonaws.com/openai-assets/research-covers/language-unsupervised/language_understanding_paper.pdf) which carries over to GPT2 (though [Rotary embeddings](https://arxiv.org/abs/2104.09864v2) were considered, but decided against because it would unfairly give an advantage to the model when compared against normal Transformers/gpt2 which uses learned absolute positional embeddings. Just as a note, positional embeddings are still "needed" as a cumulative sum would not necessarily encode position information.
 - Weight tying ([Press & Wolf 2017](https://arxiv.org/abs/1608.05859v3)) also used by Attention is All you Need, GPT1 and likewise GPT2
-- Label smoothing of .1 ([Muller, Kornblith & Hinton 2019](https://proceedings.neurips.cc/paper/2019/hash/f1748d6b0fd9d439f71450117eba2725-Abstract.html), [Viswani et al. 2017](https://arxiv.org/abs/1706.03762) is forgone because huggingface seems to oddly apply label smoothing during validation (so the loss that comes out when exponentiated would not be perplexity)
-- Attention masking of pad tokens ([Attention is All you Need by Viswani et al. (2017)](https://arxiv.org/abs/1706.03762)) which is carried over to GPT2
 - <div></div>Multihead Attention where LEAP is simply performed on down projected vectors of size $d_{model} \over n_{heads}$ in parallel with the same number of parameters as a single-head also as per Attention is All you Need by Viswani et al. (2017) which is carried over to GPT2
 - The only slight difference is that biases are not used in the attention projection like [PALM](https://arxiv.org/abs/2204.02311) as it fits with the theme of the rescaled dot-product (to keep pre-attention logits low) for increased training stability. This shouldn't affect modeling performance much (if not decreasing performance) in the comparison against GPT2
 
@@ -100,10 +98,17 @@ Because this is a causal language model the code is structured like one and impl
 
 Following landmark papers [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) which has been revisited by [Training Compute-Optimal Large Language Models](https://arxiv.org/pdf/2203.15556.pdf) we hope to show the scaling behavior of LEAP and how it's quite comparable to a vanilla Transformer like GPT2. Note that as found by [Scaling Laws vs Model Architectures](https://arxiv.org/pdf/2207.10551.pdf), few to no models can match the scaling performance of Transformers. The experiment shown are done on much less data and much less compute, but at least preliminarily show LEAP's capabilities. 
 
-![alt text](https://raw.githubusercontent.com/mtanghu/LEAP/main/Experiments/powerlaws.png)
+![alt text](https://raw.githubusercontent.com/mtanghu/LEAP/main/Experiments/wikitext103_powerlaws.png)
  The compute scaling law (left) is in line with [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf)  which reported a alpha/exponent of around -.05 which should reasonably validate this experimental setup where FLOPs are estimated the same way. Note that if the FLOPs approximation used was applied to LEAP (where the sequence length quadratic complexity is just ignored) than LEAP would just use the same amount of FLOPs as GPT2 on equivalently sized models and dataset size.
 
 The parameters scaling law (right) has a higher alpha that what is reported in [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) of -.076 because data and parameters were scaled in tandem (for speed and also to be closer to compute optimal). Only non-embedding parameters are reported following [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf) especially because the embedding parameters were a very significant proportion of the parameters. Following [Scaling Laws vs Model Architectures](https://arxiv.org/pdf/2207.10551.pdf), this test is meant to robustly compare a rather "exotic" architecture like LEAP to vanilla Transformers especially as "exotic" architectures can often get away with just having their hyperparameters/architectures tuned to match vanilla Transformer performance while not having the highly desirable scaling potential.
+
+### Enwik8 second test
+
+We try a similar test on the byte-level Enwik8 dataset to see if results transfer. Scaling laws are typically not studied for byte-level datasets (since tokenizers are generally more effective than either byte-level or word-level especially in terms of compute efficiency).
+
+![alt text](https://raw.githubusercontent.com/mtanghu/LEAP/main/Experiments/enwik8_powerlaws.png)
+Again we see LEAP about matches GPT2, though there does seem to be some "bending" of the curve on the two largest tests for LEAP. This is concerning though bigger tests will have to be done to get a conclusive answer. Especially given how noisy this test seems to be (the GPT2 curve is completely wild). Also interestingly enough compared to the [paperswithcode enwik8 leaderboard](https://paperswithcode.com/sota/language-modelling-on-enwiki8) the models trained here should be comparable in size yet the don't have nearly the same BPC as the majority of the leaderboard (i.e. not even close to being below 1).
 
 
 ## Training details
@@ -111,12 +116,12 @@ The parameters scaling law (right) has a higher alpha that what is reported in [
 Exact training details and logs can be found in `/Experiments/Scaling.ipynb` of this notebook. 
 
 
-- **Dataset:** subsets of Wikitext-103 so that the number of tokens would match the recommendation of  [Training Compute-Optimal Large Language Models](https://arxiv.org/pdf/2203.15556.pdf) where the (# parameters) is directly proportional to the (# tokens). The largest test uses the shown in the figure does use the entirety of Wikitext-103
-- **Tokenizer** a word-level tokenizer was used, but due to memory and compute constraints, the vocab size was limited to 8192. This means that the losses shown cannot be directly compared to Wikitext-103 benchmarks, but shouldn't particularly change scaling behavior
+- **Dataset:** subsets of Wikitext-103 so that the number of tokens would match the recommendation of  [Training Compute-Optimal Large Language Models](https://arxiv.org/pdf/2203.15556.pdf) where the (# parameters) is directly proportional to the (# tokens). The largest test uses the shown in the figure does use the entirety of Wikitext-103. All the same is true for the enwik8 dataset just that the test and validations splits are created manually at a random 5% of the data each
+- **Tokenizer** a word-level tokenizer was used, but due to memory and compute constraints, the vocab size was limited to 8192. This means that the losses shown cannot be directly compared to Wikitext-103 benchmarks, but shouldn't particularly change scaling behavior. The enwik8 test resolves this by just using a normal byte-level tokenizer
 - **Hyperparameters:** LEAP uses all the same hyperparameters as GPT2, all of which were chosen to be *advantageous to GPT2 and not LEAP* (likely better hyperparameters can be found for LEAP). We use a layer number ratio according to [Levine 2020](https://proceedings.neurips.cc/paper/2020/file/ff4dfdf5904e920ce52b48c1cef97829-Paper.pdf) that are best for Transformers like GPT2, and head size of 64. LEAP introduces two new hyperparameters, though they were set automatically based on preliminary testing and not tuned (they don't seem to strongly affect performance either)
 - **Training:** Training was performed for only 1 epoch on sequence lengths of 1024 (by splitting and concatenating articles) with cosine learning rate schedule with a warmup ratio of .05. This is all in line with [Scaling laws for neural language models](https://arxiv.org/pdf/2001.08361.pdf). The batch sizes were very small of just 2 because of memory constraints
 
-**Finer details:** [AdamW](https://arxiv.org/abs/1711.05101) optimizer with default configuration and learning rate of 5e-4 (after warmup and is cosine annealed). No dropout was used due to only training for 1 epoch as per the recommendation of [One Epoch Is All You Need](https://arxiv.org/abs/1906.06669)
+**Finer details:** [AdamW](https://arxiv.org/abs/1711.05101) optimizer with default configuration and learning rate of 5e-4 (after warmup and is cosine annealed). No dropout or label smoothing for regularization was used due to only training for 1 epoch as per the recommendation of [One Epoch Is All You Need](https://arxiv.org/abs/1906.06669)
 
 
 ## References
