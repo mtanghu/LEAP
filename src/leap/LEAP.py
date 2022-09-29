@@ -38,10 +38,10 @@ class MultiheadLeap(nn.Module):
         
         # unparameterized norming of vectors so dot products don't explode (also why it is after reshaping)
         if self.rescale:
-            q = self.__real_norm(q)
-            f = self.__real_norm(f)
-            k = self.__real_norm(k)
-            v = self.__real_norm(v)
+            q = self._real_norm(q)
+            f = self._real_norm(f)
+            k = self._real_norm(k)
+            v = self._real_norm(v)
             
         # dropout regularization (keys don't need dropout as they are always dotted with a dropped out vector)
         q = self.drop(q)
@@ -64,10 +64,10 @@ class MultiheadLeap(nn.Module):
         
         # normalization term for softmax
         cumulative_weights = torch.cumsum(focus_weights, dim = 1)
-        cumulative_weights = cumulative_weights - self.__window_align(cumulative_weights)
+        cumulative_weights = cumulative_weights - self._window_align(cumulative_weights)
         
-        focused_k = self.__w_focus(focus_weights, cumulative_weights, k)
-        focused_v = self.__w_focus(focus_weights, cumulative_weights, v)
+        focused_k = self._w_focus(focus_weights, cumulative_weights, k)
+        focused_v = self._w_focus(focus_weights, cumulative_weights, v)
         
         # querying by measuring dot product alignment (with scaling)
         alignment = torch.sigmoid((q * focused_k).sum(dim = -1) * self.scaling_factor)
@@ -79,22 +79,22 @@ class MultiheadLeap(nn.Module):
         return attention
 
 
-    def __real_norm(self, mod):
+    def _real_norm(self, mod):
         # normalize x on the last dimension (the head dimension in this case) with eps term for stability
         return (mod - mod.mean(dim = -1).unsqueeze(-1)) / (mod.std(dim = -1).unsqueeze(-1) + 1e-5)
 
 
-    def __w_focus(self, focus_weights, cumulative_weights, mod):
+    def _w_focus(self, focus_weights, cumulative_weights, mod):
         # pass cumulative weights so they don't have to be recalculated
         weighted_mod = torch.cumsum(focus_weights * mod, dim = 1)
-        weighted_mod = weighted_mod - self.__window_align(weighted_mod)
+        weighted_mod = weighted_mod - self._window_align(weighted_mod)
         
         # finish softmax by dividing by weight totals (with numerical stability term)
         focused_mod = weighted_mod / (cumulative_weights + 1e-5)
         return focused_mod
 
 
-    def __window_align(self, mod):
+    def _window_align(self, mod):
         # zero out the last window_size vectors, and roll these vectors to the front
         # thus, at every sequence index will contain the "past" cumuluative sum to subtract away
         clone_mod = torch.clone(mod) # clone keeps gradients
