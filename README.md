@@ -74,7 +74,7 @@ The math tricky and overly verbose/complicated at the moment but can be found in
 
 ### Why cumulative sum?
 
-Cumulative sums were used reasonably successfully in previous linear attention mechanisms like [Linear Transformers](https://arxiv.org/pdf/2006.16236.pdf) though they don't use the *parallel* cumulative sum that can be run in logarithmic time (w.r.t. sequence length) as noted by [Performer](https://arxiv.org/abs/2009.14794). This can be seen in the following circuit diagram (from [wikipedia prefix sum page](https://en.wikipedia.org/wiki/Prefix_sum)).
+Cumulative sums were used reasonably successfully in previous linear attention mechanisms like [Linear Transformers](https://arxiv.org/pdf/2006.16236.pdf) though they don't use the *parallel* cumulative sum that can be run in logarithmic time (w.r.t. sequence length) as noted by [Performer](https://arxiv.org/abs/2009.14794). This can be seen in the following circuit diagram (from [wikipedia prefix sum page](https://en.wikipedia.org/wiki/Prefix_sum)). This means that a model of this kind could actually **proportionally run faster on longer sequences** (i.e. doubling the sequence length only increases the wall time by less than double).
 
 
 ![alt text](https://upload.wikimedia.org/wikipedia/commons/8/81/Prefix_sum_16.svg)
