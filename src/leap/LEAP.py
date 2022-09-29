@@ -196,8 +196,8 @@ class LeapConfig(PretrainedConfig):
         # check head sizes
         assert hidden_size % n_head == 0, "hidden_size is not divisible by n_head"
         
-        if (hidden_size // n_head) > 64:
-            warnings.warn("Using a hidden_size-to-head ratio of greater than 64 is not ideal as"
+        if (hidden_size // n_head) > 128:
+            warnings.warn("Using a hidden_size-to-head ratio of greater than 129 is not ideal as"
                           " LEAP uses a simplified form of attention that relies on having many heads")
         if (hidden_size // n_head) < 32:
             warnings.warn("Using a hidden_size-to-head ratio of less than 64 can sometimes lead to instability")
