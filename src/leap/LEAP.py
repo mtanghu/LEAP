@@ -23,12 +23,17 @@ class MultiheadLeap(nn.Module):
             # use normal scaling factor
             self.rescale = False
             self.scaling_factor = (1 / self.head_size**.5)
-
+                
+        # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
+        self.projections = nn.Linear(hidden_size, 4 * hidden_size, bias = False)
         self.drop = nn.Dropout(dropout)
 
 
-    def forward(self, q, f, k, v, attention_mask = None):        
-        batch_size, seq_len, hidden_size = v.shape
+    def forward(self, mod, attention_mask = None):        
+        batch_size, seq_len, hidden_size = mod.shape
+        
+        # projections so each matrix has its own purpose
+        q, f, k, v = self.projections(mod).chunk(4, dim = -1)
         
         # reshape for multihead formulation
         q = q.reshape(batch_size, seq_len, self.n_head, self.head_size)
@@ -109,11 +114,8 @@ class LeapBlock(nn.Module):
     def __init__(self, config, window_size):
         super(LeapBlock, self).__init__()
 
-        self.attn_norm = nn.LayerNorm(config.hidden_size)
-        
         # modules for leap
-        # note: one large projection matrix is equivalent to having seperate projection matrices and is faster
-        self.projections = nn.Linear(config.hidden_size, 4 * config.hidden_size, bias = False)
+        self.attn_norm = nn.LayerNorm(config.hidden_size)
         self.leap = MultiheadLeap(config.hidden_size, config.n_head, window_size,
                                   rescale = config.rescale, dropout = config.hidden_dropout_prob)
 
@@ -125,12 +127,9 @@ class LeapBlock(nn.Module):
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, mod, attention_mask):
-        # pre-norming with projections so each matrix has its own purpose
-        q, f, k, v = self.projections(self.attn_norm(mod)).chunk(4, dim = -1)
-        
+    def forward(self, mod, attention_mask):        
         # unnormed residual connection
-        mod = mod + self.leap(q, f, k, v, attention_mask)
+        mod = mod + self.leap(self.attn_norm(mod), attention_mask)
         
         # feedforward layer with pre-norming
         mod = mod + self.__boom(self.boom_norm(mod))
