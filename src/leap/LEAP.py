@@ -123,7 +123,7 @@ class LeapBlock(nn.Module):
         self.boom_drop = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, mod, attention_mask):        
+    def forward(self, mod):        
         # unnormed residual connection
         mod = mod + self.leap(self.attn_norm(mod))
         
@@ -247,7 +247,7 @@ class LeapForCausalLM(PreTrainedModel):
             attention_mask = torch.ones(input_ids.shape).to(input_ids.device)
         
         embds = self.word_embedding(input_ids)
-        layer_outputs = self.leap_model(embds, attention_mask)
+        layer_outputs = self.leap_model(embds)
         layer_outputs = self.last_norm(layer_outputs)
         logits = self.proj_logits(layer_outputs)
         
