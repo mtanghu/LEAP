@@ -29,7 +29,7 @@ class MultiheadLeap(nn.Module):
         self.drop = nn.Dropout(dropout)
 
 
-    def forward(self, mod, attention_mask = None):        
+    def forward(self, mod):        
         batch_size, seq_len, hidden_size = mod.shape
         
         # projections so each matrix has its own purpose
@@ -58,10 +58,6 @@ class MultiheadLeap(nn.Module):
         
         # apply dropout to logits so that all tokens will have a chance at getting focus
         focus_logits = self.drop(focus_logits)
-        
-        # masking out pad tokens
-        if attention_mask is not None:
-            focus_logits += attention_mask
         
         # manual softmax within cumulative sum
         focus_weights = torch.exp(focus_logits)
@@ -129,7 +125,7 @@ class LeapBlock(nn.Module):
 
     def forward(self, mod, attention_mask):        
         # unnormed residual connection
-        mod = mod + self.leap(self.attn_norm(mod), attention_mask)
+        mod = mod + self.leap(self.attn_norm(mod))
         
         # feedforward layer with pre-norming
         mod = mod + self.__boom(self.boom_norm(mod))
@@ -162,11 +158,7 @@ class LeapDecoder(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
-    def forward(self, input_embs, attention_mask):
-        attention_mask = attention_mask.to(dtype = next(self.parameters()).dtype)  # fp16 compatibility
-        attention_mask = (1.0 - attention_mask) * -100.0
-        attention_mask = attention_mask.unsqueeze(-1)
-        
+    def forward(self, input_embs):
         batch_size, seq_length, _ = input_embs.shape
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_embs.device)
         position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
@@ -178,7 +170,7 @@ class LeapDecoder(nn.Module):
         
         layer_outputs = embeddings
         for i, layer_module in enumerate(self.decoders):
-            layer_outputs = layer_module(layer_outputs, attention_mask)
+            layer_outputs = layer_module(layer_outputs)
 
         return layer_outputs
     
