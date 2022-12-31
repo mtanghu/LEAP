@@ -1,5 +1,7 @@
 # Linear Explainable Attention in Parallel (LEAP)
 
+**This project is currently not under active development for the time being. Linear Attention doesn't particularly seem like a promising research area for the future of AI, this was certainly a fun project though!**
+
 This project implements a novel linear attention mechanism based on "softmax-weighted cumulative sums" which has surprisingly favorable properties in computational complexity, explainability, and theoretical expressiveness. This project strongly believes that this linear attention mechanism can replace full attention with virtually no tradeoffs, if not actually having even better performance (because it's a more simple attention mechanism). This was originally inspired by adapting [Fastformer: Additive attention can be all you need](https://arxiv.org/abs/2108.09084) by Wu et al. (2021) (where they don't use any kind of cumulative sum)  for causal language modeling which we also implement with documentation and a comprehensive README that can be found in `src/leap/fastformerLM`. 
 
 Reasons why LEAP may be able to replace full attention:
