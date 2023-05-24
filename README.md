@@ -59,7 +59,7 @@ A more complete training example with a dataset, tokenization, and evaluations c
 
 ### Development and Contributing
 
-This project needs your help! If you want to contribute, (optionally) make/address a github issue, or just send in a pull request! There will likely be a paper published for this where all contributors will be named, so please state your interested in this! Use these installation instructions so that you will have the latest repo and your edits will be reflected when you run the code
+Use these installation instructions so that you will have the latest repo and your edits will be reflected when you run the code
 
 ```bash
 git clone https://github.com/mtanghu/LEAP.git
