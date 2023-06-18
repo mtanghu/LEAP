@@ -108,7 +108,7 @@ The parameters scaling law (right) has a higher alpha that what is reported in [
 We try a similar test on the byte-level Enwik8 dataset to see if results transfer. Scaling laws are typically not studied for byte-level datasets (since tokenizers are generally more effective than either byte-level or word-level especially in terms of compute efficiency).
 
 ![alt text](https://raw.githubusercontent.com/mtanghu/LEAP/main/Experiments/enwik8_powerlaws.png)
-Again we see LEAP about matches GPT2, though there does seem to be some "bending" of the curve on the two largest tests for LEAP. This is concerning though bigger tests will have to be done to get a conclusive answer. Especially given how noisy this test seems to be (the GPT2 curve is completely wild). Also interestingly enough compared to the [paperswithcode enwik8 leaderboard](https://paperswithcode.com/sota/language-modelling-on-enwiki8) the models trained here should be comparable in size yet the don't have nearly the same BPC as the majority of the leaderboard (i.e. not even close to being below 1).
+Again we see LEAP about matches GPT2, though there does seem to be some "bending" of the curve on the two largest tests for LEAP. This is concerning though bigger tests will have to be done to get a conclusive answer. Especially given how noisy this test seems to be (the GPT2 curve is completely wild). Note that the results shown have higher loss compared to the [paperswithcode enwik8 leaderboard](https://paperswithcode.com/sota/language-modelling-on-enwiki8) due to only training for a single epoch (meant to evaluate scaling potential and not peak performance).
 
 
 ## Training details
